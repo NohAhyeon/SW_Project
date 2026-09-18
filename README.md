@@ -170,7 +170,7 @@ sudo ./LCD35-show 90
 
 ---
 
-### 🔌 5. HDMI 모니터 출력으로 원상복구 (Revert to HDMI)
+#### 🔌 5. HDMI 모니터 출력으로 원상복구 (Revert to HDMI)
 
 LCD 모듈을 제거하고 다시 라즈베리 파이의 기본 HDMI 포트로 화면을 출력하고 싶다면 아래 명령어를 실행합니다.
 ```bash
