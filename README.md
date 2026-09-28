@@ -1,196 +1,129 @@
-# 🤖 SW_Project (라즈베리파이 5 챗봇 & LCD 드라이버)
+# 🌿 OASIS (임베디드 기반 노인 케어 AI 음성 챗봇)
 
-[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/)
-[![Platform](https://img.shields.io/badge/platform-Raspberry%20Pi%205-red.svg)](https://www.raspberrypi.com/)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](https://opensource.org/licenses/MIT)
+> **"집 안의 위험은 센서와 카메라가 감지하고, 보호자는 앱으로 확인하며, 어르신은 음성으로 자연스럽게 상호작용합니다."**
 
-**SW_Project** 저장소에 오신 것을 환영합니다! 이 저장소는 **라즈베리파이 5(Raspberry Pi 5)** 기반의 스마트 챗봇 및 AI 음성 비서 시스템과, 휴대용 모니터 설정을 위한 **LCDWiki 디스플레이 드라이버** 모듈을 통합한 프로젝트입니다.
-
----
-
-## 📂 저장소 디렉토리 구조
-
-프로젝트 소스 코드와 LCD 드라이버 유틸리티 스크립트를 명확히 구분하기 위해 다음과 같이 폴더 구조를 격리 및 정리했습니다.
-
-```
-SW_Project/
-├── oasis/                     # 가스 센서 및 챗봇 메인 프로젝트
-│   ├── mq5.py                 # MQ5 가스 센서 연동 스크립트
-│   └── temporaryMain.py       # 메인 챗봇 제어 루프 및 프로그램
-├── my_ai_project/             # AI 음성 비서 및 카메라 프로젝트
-│   ├── main.py                # Gemini/Groq 음성 비서 & 카메라 스트림 메인 스크립트
-│   ├── camera_stream.py       # 카메라 스트리밍 유틸리티
-│   └── launcher.py            # 자동 실행 도우미
-├── LCD-show/                  # 독립 격리된 LCDWiki 디스플레이 드라이버
-│   ├── boot/, etc/, usr/      # 시스템 설정 및 디바이스 트리 오버레이 (.dtb)
-│   ├── *.deb                  # 로컬 설치 의존성 패키지
-│   ├── *show                  # 디스플레이 모델별 드라이버 설치 스크립트 (예: LCD35-show)
-│   └── rotate.sh              # 화면 회전(각도) 제어 스크립트
-├── rpi-fbcp/                  # 프레임버퍼 복사 라이브러리
-├── requirements_env.txt       # 챗봇 및 센서 환경(env) 의존성 패키지 목록
-├── requirements_myenv.txt     # AI 비서 및 카메라 환경(myenv) 의존성 패키지 목록
-└── README.md                  # 프로젝트 설명 문서 (본 파일)
-```
+![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat-square&logo=FastAPI&logoColor=white)
+![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169E1?style=flat-square&logo=PostgreSQL&logoColor=white)
+![Flutter](https://img.shields.io/badge/Flutter-02569B?style=flat-square&logo=Flutter&logoColor=white)
+![Raspberry Pi 5](https://img.shields.io/badge/Raspberry%20Pi%205-C51A4A?style=flat-square&logo=RaspberryPi&logoColor=white)
+![Llama 3.1](https://img.shields.io/badge/Meta-Llama%203.1-0467DF?style=flat-square&logo=Meta&logoColor=white)
 
 ---
 
-## 🚀 시작하기
+## 📌 1. 프로젝트 개요
 
-### 1. 파이썬 가상환경 설정 및 라이브러리 설치
-실행하려는 모듈에 따라 두 가지 가상환경 중 하나를 선택하여 설정하고 필요한 라이브러리를 다운로드합니다.
-
-#### 옵션 A: 챗봇 및 센서 환경 (`env`)
-GenAI, Groq, Pygame, 하드웨어 바인딩(CircuitPython 등)이 포함된 환경입니다.
-
-* **방법 1: requirements 파일을 사용하여 한 번에 라이브러리 다운로드 (권장)**
-  ```bash
-  python -m venv env
-  source env/bin/activate  # Windows 환경: env\Scripts\activate
-  pip install -r requirements_env.txt
-  ```
-* **방법 2: 터미널 명령어로 핵심 패키지만 직접 개별 다운로드**
-  ```bash
-  pip install google-genai groq gTTS pygame sounddevice soundfile RPi.GPIO rpi_ws281x RPLCD smbus2 adafruit-circuitpython-mcp3xxx adafruit-blinka
-  ```
-
-#### 옵션 B: AI 음성 비서 및 카메라 환경 (`myenv`)
-Edge-TTS, Flask 서버, OpenCV, Scipy 및 각종 미디어 인터페이스 패키지가 포함된 환경입니다.
-
-* **방법 1: requirements 파일을 사용하여 한 번에 라이브러리 다운로드 (권장)**
-  ```bash
-  python -m venv myenv
-  source myenv/bin/activate  # Windows 환경: myenv\Scripts\activate
-  pip install -r requirements_myenv.txt
-  ```
-* **방법 2: 터미널 명령어로 핵심 패키지만 직접 개별 다운로드**
-  ```bash
-  pip install Flask edge-tts opencv-python sounddevice soundfile pydantic numpy groq google-genai gtts aiohttp
-  ```
+초고령사회 진입 및 독거노인 가구 증가에 따라 고독사 및 돌봄 공백이 심각한 사회적 문제로 대두되고 있습니다.  
+**OASIS**는 단순 대기형 스피커를 넘어 **임베디드 엣지 디바이스**, **AI 음성 대화 파이프라인**, **보호자 전용 모바일 앱**을 하나로 결합하여 어르신의 안전 및 정서 케어를 능동적으로 보살피는 통합 케어 솔루션입니다.
 
 ---
 
-### 2. API 키 설정 (보안)
-챗봇과 음성 비서 기능은 원격 AI 모델(Gemini, Groq)과 통신하기 때문에 API 키 설정이 필요합니다. **보안을 위해 소스 코드에 키를 직접 입력(하드코딩)하지 마시고**, 실행하기 전에 터미널에 환경 변수로 등록하여 사용하세요.
+## 🌟 2. 주요 기능 (Key Features)
 
-```bash
-export GEMINI_API_KEY="본인의_Gemini_API_키"
-export GROQ_API_KEY="본인의_Groq_API_키"
+### 🎙️ AI 음성 대화 파이프라인
+* **초고속 음성 인식(STT)**: Groq Whisper API를 활용하여 수백 ms 내에 음성을 한국어 텍스트로 변환
+* **어르신 맞춤형 대화(LLM)**: Llama 3.1 기반 말벗 대화, 정서적 고립감 해소 및 생활 정보/날씨 안내
+* **자연스러운 음성 합성(TTS)**: Microsoft Edge TTS를 적용하여 어르신 맞춤형 발화 속도와 명확한 한국어 음성 출력
+
+### 📹 라즈베리파이 홈캠 모니터링
+* **저지연 영상 스트리밍**: Raspberry Pi 5 카메라 모듈 기반 MJPEG 실시간 스트리밍 송출
+* **무중단 백그라운드 운영**: `systemd` 서비스 등록으로 부팅 시 자동 데몬 실행 및 네트워크 끊김 시 백그라운드 자동 재연결
+
+### 🚨 센서 기반 위험 감지 & 긴급 알림
+* **실시간 가스 누출 감지**: MCP3008 ADC 칩과 MQ-5 가스 센서로 아날로그 전압을 계측하여 임계값 초과 시 즉시 이상 감지
+* **즉각적 긴급 전파**: 센서 감지 즉시 FastAPI 백엔드로 긴급 POST 전송 ➔ 보호자 앱 긴급 경고 배너 표출 및 라즈베리파이 스피커 비프음/대피 음성 송출
+
+### 💊 맞춤형 복약 알림 시스템
+* **복약 일정 CRUD 관리**: 보호자가 약 이름 및 복용 시각을 자유롭게 관리
+* **음성 자동 안내 & 달성률 시각화**: 정해진 시간에 스피커 안내 음성 자동 송출, 앱 내 오늘 복약 달성률(%) 프로그레스 바 제공
+
+### 📱 사용자 맞춤형 이중 뷰 (Dual View)
+* **어르신용 화면 (Senior View)**: 큰 글씨, 큼직한 아이콘의 직관적 UI, 무터치 음성 상호작용, 원터치 SOS 긴급 버튼
+* **보호자용 화면 (Guardian View)**: 실시간 영상 모니터링, 복약 달성률 통계, 이상 징후 푸시 알림, AI 대화 기록 타임라인 열람
+
+---
+
+## 🏗️ 3. 시스템 아키텍처 (System Architecture)
+
+```mermaid
+graph TD
+    subgraph Frontend ["Flutter Mobile App (iOS / Android)"]
+        UI1["어르신 / 보호자 이중 뷰 모드"]
+        UI2["복약 관리 & 달성률 대시보드"]
+        UI3["실시간 MJPEG 홈캠 플레이어"]
+        UI4["AI 대화 기록 & 센서 알림 타임라인"]
+    end
+
+    subgraph Backend ["FastAPI Backend Server & DB"]
+        API["RESTful API Router"]
+        DB[(PostgreSQL DB)]
+        AUTH["JWT 사용자 인증 & 암호화"]
+        SCHED["백그라운드 복약 스케줄러"]
+        ALERT["긴급 센서 이벤트 알림 처리"]
+    end
+
+    subgraph Embedded ["Raspberry Pi 5 Edge Device"]
+        CAM["MJPEG 카메라 스트리밍 서버"]
+        STT["Whisper STT (sounddevice)"]
+        LLM["Llama 3.1 AI 대화 추론"]
+        TTS["Edge TTS 음성 합성 & 스피커"]
+        SENSOR["MQ-5 가스센서 (MCP3008 ADC)"]
+    end
+
+    Frontend <-->|HTTP REST API| Backend
+    Backend <-->|HTTP REST API| Embedded
 ```
 
----
-
-### 3. 프로젝트 실행 방법
-
-#### 챗봇 실행 (`oasis`)
-`env` 가상환경이 활성화되어 있는지 확인한 후 실행합니다:
-```bash
-python oasis/temporaryMain.py
-```
-
-#### AI 음성 비서 실행 (`my_ai_project`)
-`myenv` 가상환경이 활성화되어 있는지 확인한 후 실행합니다:
-```bash
-python my_ai_project/main.py
-```
+### 🔄 라즈베리파이 음성 대화 파이프라인
+`마이크 음성 입력 (sounddevice 16kHz PCM)` ➔ `Groq Whisper STT` ➔ `Llama 3.1 LLM 응답 생성` ➔ `Edge TTS 음성 합성` ➔ `스피커 출력`
 
 ---
 
-## 🖥️ 3.5인치 LCD 터치 스크린 설정 가이드 (MPI3501)
+## 🛠️ 4. 기술 스택 (Tech Stack)
 
-본 프로젝트는 **3.5인치 라즈베리 파이 TFT 터치 스크린(모델명: MPI3501)** 모듈의 드라이버 설치 및 설정을 기본 지원합니다. 다른 팀원들이 실물 모듈을 하드웨어에 장착하고 소프트웨어를 설정하여 바로 사용할 수 있도록 정리한 가이드입니다.
-
----
-
-### 📌 1. 모듈 주요 사양 (Specifications)
-| 항목 | 상세 사양 |
+| 구분 | 기술 스택 |
 | :--- | :--- |
-| **모델명 / SKU** | MPI3501 (3.5inch RPi Display) |
-| **화면 해상도** | 480 × 320 픽셀 (TFT LCD) |
-| **디스플레이 인터페이스** | SPI (라즈베리파이 40핀 GPIO 헤더 장착) |
-| **드라이버 IC** | ILI9486 |
-| **터치 방식** | 감압식 터치 (Resistive Touch, 터치 펜 포함) |
-| **소모 전력** | 5V / 0.13A |
-| **크기** | 85.42mm × 55.60mm |
+| **Embedded & Edge** | Raspberry Pi 5, Python 3.11, sounddevice, MCP3008 ADC, MQ-5 Gas Sensor |
+| **AI Engine** | Groq Whisper API (STT), Meta Llama 3.1 (LLM), Microsoft Edge-TTS (TTS) |
+| **Backend & Server** | FastAPI, PostgreSQL, SQLAlchemy, JWT Authentication, Asyncio Scheduler |
+| **Frontend & App** | Flutter (Dart), MJPEG Streaming Player, Provider / Riverpod |
+| **Infra & DevOps** | systemd (Auto-start), Git & GitHub |
 
 ---
 
-### 🔌 2. 하드웨어 연결 방법 (물리적 장착)
+## 👥 5. 팀원 소개 및 업무 분담 (Team Roles & Responsibilities)
 
-> [!CAUTION]
-> **반드시 라즈베리 파이의 전원을 완전히 차단(OFF)한 상태에서 모듈을 장착하세요.** 전원이 켜진 상태에서 핀을 꽂으면 보드나 LCD 칩이 손상될 수 있습니다.
+| 이름 | 역할 |
+| :---: | :--- |
+| **노아현** | **팀장 / 백엔드 & 서버** |
+| **최대영** | 라즈베리파이 / AI |
+| **김다혜** | 프론트엔드 / 관리 앱 |
 
-1. 라즈베리 파이의 40핀 GPIO 헤더와 LCD 모듈 뒷면의 암형 헤더 핀 위치를 맞춥니다.
-2. LCD 모듈을 **1번 핀(SD 카드 슬롯 반대쪽 모서리 방향)** 기준으로 오차 없이 정렬합니다.
-3. LCD가 흔들리지 않도록 아래 방향으로 가볍고 일정하게 힘을 주어 완전히 밀착되도록 장착합니다.
-4. 장착이 완료되면 전원 공급 장치를 연결하여 라즈베리 파이를 부팅합니다.
+<br>
 
----
+### 👑 노아현 (팀장 / 백엔드 & 서버 담당)
+* **프로젝트 총괄**: 전체 개발 일정 관리, 교수님 면담 진행 및 시스템 종합 아키텍처 설계
+* **백엔드 서버 구축**: FastAPI 프레임워크 기반 RESTful API 라우터 설계 및 서버 아키텍처 구성
+* **데이터베이스 설계**: PostgreSQL 관계형 데이터베이스 모델링 및 데이터 영속성 관리
+* **인증 및 보안**: JWT 기반 사용자 인증 체계 구축 및 민감 대화 데이터 암호화 저장 처리
+* **비동기 스케줄러 & 알림**: 백그라운드 복약 알림 스케줄러 개발 및 MQ-5 가스 감지 긴급 알림 수신 API 구축
 
-### ⚙️ 3. 소프트웨어 드라이버 설치 (Software Setup)
+### 🤖 최대영 (라즈베리파이 / AI 담당)
+* **임베디드 환경 구축**: 라즈베리파이 OS 환경 세팅, 개발환경 구성 및 `systemd` 자동 실행 서비스 등록
+* **음성 파이프라인 통합**: `sounddevice` 기반 음성 수집(16kHz PCM), Groq Whisper STT, Llama 3.1 LLM, Edge TTS 연동 및 파이프라인 구동
+* **프롬프트 엔지니어링**: 어르신 맞춤형 친근한 어조의 Llama 3.1 대화 프롬프트 튜닝
+* **하드웨어 센서 연동**: MCP3008 ADC 칩과 SPI 통신을 활용한 MQ-5 가스 감지 하드웨어 회로 구현 및 데이터 수집
 
-라즈베리파이가 인터넷에 연결되어 있는지 확인한 후, 아래의 단계에 따라 터미널에서 명령어를 실행합니다.
-
-#### Step 1. 저장소 이동 및 권한 부여
-프로젝트 내의 `LCD-show` 디렉토리로 이동하여 설치 스크립트에 실행 권한을 부여합니다.
-```bash
-# 본 프로젝트 저장소 루트 디렉토리에서 실행
-cd SW_Project/LCD-show/
-chmod -R 755 .
-```
-
-#### Step 2. 드라이버 설치 스크립트 실행
-3.5인치 일반형 디스플레이(`MPI3501`)에 맞는 설치 스크립트를 관리자 권한으로 실행합니다.
-```bash
-sudo ./LCD35-show
-```
-
-> [!IMPORTANT]
-> **설치 스크립트가 완료되면 라즈베리 파이가 자동으로 재부팅(Reboot)됩니다.**
-> 저장하지 않은 작업이 있다면 미리 저장한 후 실행해 주세요.
-> 재부팅이 완료되면 연결한 3.5인치 LCD 화면으로 화면 출력이 전환됩니다.
+### 📱 김다혜 (프론트엔드 / 관리 앱 담당)
+* **UI/UX 전면 설계**: Flutter 프레임워크 기반 크로스 플랫폼 모바일 앱 UI/UX 기획 및 디자인
+* **이중 뷰 (Dual View) 구현**:
+  * **어르신용 화면**: 고대비 컬러, 큰 글씨/버튼 중심의 단순 UI 및 원터치 긴급 SOS 기능
+  * **보호자용 화면**: 원격 모니터링 및 상태 관리 대시보드
+* **타임라인 & 대시보드**: 어르신-AI 간 대화 기록 타임라인, 실시간 이상 감지 알림 타임라인 제작
+* **복약 시각화 & 홈캠 연동**: 복약 일정 CRUD 및 일일 달성률(%) 프로그레스 바 구현, 실시간 MJPEG 홈캠 영상 스트리밍 연동
 
 ---
 
-### 🔄 4. 화면 및 터치 회전 설정 (Rotate Screen)
+## 🔗 6. 저장소 정보
 
-사용 방향에 맞게 화면의 출력 방향 및 터치 입력 좌표를 90도 단위로 회전할 수 있습니다. (지원 각도: `0`, `90`, `180`, `270`)
-
-#### 드라이버가 이미 설치된 상태에서 회전하기:
-```bash
-cd SW_Project/LCD-show/
-sudo ./rotate.sh 90
-```
-*(예: `rotate.sh 90`은 화면을 가로 방향으로 90도 회전시킵니다.)*
-
-#### 드라이버 최초 설치 단계에서 회전 방향 지정하기:
-```bash
-cd SW_Project/LCD-show/
-sudo ./LCD35-show 90
-```
-
----
-
-#### 🔌 5. HDMI 모니터 출력으로 원상복구 (Revert to HDMI)
-
-LCD 모듈을 제거하고 다시 라즈베리 파이의 기본 HDMI 포트로 화면을 출력하고 싶다면 아래 명령어를 실행합니다.
-```bash
-cd SW_Project/LCD-show/
-sudo ./LCD-hdmi
-```
-*(명령 실행 후 시스템이 자동으로 재부팅되며, 화면 출력이 HDMI 포트로 되돌아갑니다.)*
-
----
-
-### 🔍 6. 문제 해결 (Troubleshooting)
-
-#### Q1. 화면이 하얗게만 나오고 아무것도 뜨지 않습니다 (White Screen)
-* **물리적 연결 확인**: LCD 모듈이 40핀 GPIO 헤더에 어긋남 없이 완전히 장착되었는지 전원을 끄고 다시 점검하세요.
-* **드라이버 재설치**: 간혹 커널 업데이트 등으로 인해 드라이버가 누락될 수 있으므로, 다시 `sudo ./LCD35-show` 명령어를 통해 재설치를 시도해 보세요.
-
-#### Q2. 터치 입력 위치와 화면의 클릭 위치가 맞지 않습니다 (Touch Calibration)
-* 드라이버 설치 폴더 내의 회전 유틸리티(`rotate.sh`)를 사용하여 각도를 맞추었는지 다시 확인하세요.
-* 좌표 보정이 세밀하게 필요할 경우 다음 패키지를 설치하여 보정을 진행할 수 있습니다.
-  ```bash
-  sudo apt-get install xinput-calibrator
-  ```
-  이후 GUI 환경의 [기본 메뉴] -> [기본 설정] -> [Calibrate Touchscreen]을 통해 보정 값을 갱신해 줍니다.
+* **GitHub Repository**: [https://github.com/NohAhyeon/SW_Project](https://github.com/NohAhyeon/SW_Project)
+* **팀명**: 팀 OASIS
