@@ -1,0 +1,1600 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>OASIS — 시니어 케어 앱 (UI/UX 개선 목업)</title>
+<link rel="preconnect" href="https://cdn.jsdelivr.net" />
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
+<style>
+/* ─────────────────────────────────────────
+   DESIGN TOKENS
+   ───────────────────────────────────────── */
+:root{
+  --bg:#F7F8FA; --surface:#FFFFFF; --surface-2:#F2F4F6;
+  --line:#EAECEF; --line-strong:#D1D6DB;
+  --text-1:#191F28; --text-2:#4E5968; --text-3:#8B95A1; --text-4:#B0B8C1;
+  --brand:#3182F6; --brand-soft:#E8F2FE; --brand-pressed:#1B64DA;
+  --danger:#F04452; --danger-soft:#FDECEE;
+  --warning:#FF8A00; --warning-soft:#FFF3E5;
+  --success:#00B96B; --success-soft:#E5F8EF;
+  --shadow-sm:0 1px 2px rgba(0,0,0,0.04),0 1px 1px rgba(0,0,0,0.02);
+  --shadow-md:0 4px 12px rgba(0,0,0,0.06);
+  --shadow-lg:0 12px 32px rgba(0,0,0,0.08);
+  --r-sm:8px; --r-md:12px; --r-lg:16px; --r-xl:20px; --r-2xl:24px; --r-full:9999px;
+  --font:'Pretendard Variable',Pretendard,-apple-system,BlinkMacSystemFont,system-ui,sans-serif;
+
+  /* 시니어 폰트 스케일 — 일반 모드 */
+  --sf-xs:16px; --sf-sm:18px; --sf-md:20px; --sf-lg:24px; --sf-xl:30px; --sf-2xl:38px;
+}
+
+/* 심플 모드: 더 큰 폰트 */
+.simple-mode{
+  --sf-xs:19px; --sf-sm:22px; --sf-md:25px; --sf-lg:30px; --sf-xl:36px; --sf-2xl:44px;
+}
+
+/* 심플 모드에서 숨길 요소 */
+.simple-mode .hide-simple{ display:none !important; }
+
+*,*::before,*::after{ box-sizing:border-box; }
+html,body{ margin:0; padding:0; }
+body{
+  background:#D8DCE0;
+  font-family:var(--font);
+  color:var(--text-1);
+  -webkit-font-smoothing:antialiased;
+  min-height:100vh;
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  padding:28px 16px 60px;
+  gap:20px;
+}
+button{ font-family:inherit; cursor:pointer; border:none; background:none; padding:0; color:inherit; }
+
+/* ─── 페이지 타이틀 ─── */
+.page-title{
+  text-align:center;
+  color:#fff;
+  margin-bottom:4px;
+}
+.page-title h1{
+  font-size:20px; font-weight:800; margin:0;
+  letter-spacing:-0.3px;
+  text-shadow:0 1px 4px rgba(0,0,0,0.15);
+}
+.page-title p{
+  font-size:13px; margin:6px 0 0; opacity:0.75; font-weight:600;
+}
+
+/* ─── 폰 섹션 래퍼 ─── */
+.phones-wrapper{
+  display:flex;
+  gap:40px;
+  align-items:flex-start;
+  flex-wrap:wrap;
+  justify-content:center;
+}
+.phone-section{
+  display:flex;
+  flex-direction:column;
+  align-items:center;
+  gap:14px;
+}
+.phone-label{
+  display:flex; align-items:center; gap:8px;
+  padding:9px 18px;
+  background:#fff;
+  border-radius:var(--r-full);
+  box-shadow:0 2px 8px rgba(0,0,0,0.1);
+  font-size:14px; font-weight:800; color:var(--text-1);
+}
+.phone-label .badge{
+  padding:3px 10px; border-radius:var(--r-full);
+  font-size:11px; font-weight:800;
+  background:var(--brand-soft); color:var(--brand);
+}
+.phone-label .badge.g{ background:var(--success-soft); color:var(--success); }
+
+/* 모드 토글 버튼 */
+.mode-switch{
+  display:flex; background:#fff;
+  border-radius:var(--r-full); padding:4px;
+  box-shadow:0 2px 8px rgba(0,0,0,0.1); gap:2px;
+}
+.mode-btn{
+  padding:7px 16px; border-radius:var(--r-full);
+  font-size:13px; font-weight:700; color:var(--text-3);
+  border:none; background:none; font-family:inherit;
+  transition:all 0.18s;
+}
+.mode-btn.active{ background:var(--text-1); color:#fff; }
+
+/* ─── 폰 껍데기 ─── */
+.phone{
+  width:390px; height:844px;
+  background:var(--bg);
+  border-radius:48px;
+  border:10px solid #1A1F25;
+  overflow:hidden; position:relative;
+  box-shadow:0 30px 80px rgba(0,0,0,0.25),0 8px 24px rgba(0,0,0,0.12);
+  display:flex; flex-direction:column;
+}
+.notch{
+  position:absolute; top:8px; left:50%; transform:translateX(-50%);
+  width:120px; height:28px;
+  background:#1A1F25; border-radius:0 0 18px 18px; z-index:100;
+}
+.statusbar{
+  height:44px; padding:0 28px;
+  display:flex; align-items:center; justify-content:space-between;
+  font-size:14px; font-weight:700; color:var(--text-1); flex-shrink:0;
+}
+.statusbar .right{ display:flex; gap:6px; align-items:center; }
+.pages{ flex:1; overflow:hidden; position:relative; }
+.page{
+  position:absolute; inset:0;
+  overflow-y:auto; overflow-x:hidden;
+  background:var(--bg); display:none; scroll-behavior:smooth;
+}
+.page.active{ display:block; }
+.page::-webkit-scrollbar{ display:none; }
+.page{ -ms-overflow-style:none; scrollbar-width:none; }
+.gap-24{ height:24px; }
+
+/* ─── 공통 컴포넌트 ─── */
+.topbar{
+  background:var(--surface); padding:12px 20px 14px;
+  display:flex; align-items:center; justify-content:space-between;
+  position:sticky; top:0; z-index:10;
+}
+.topbar h1{ font-size:22px; font-weight:800; letter-spacing:-0.4px; margin:0; }
+.topbar .icon-btn{
+  width:40px; height:40px; display:grid; place-items:center;
+  border-radius:var(--r-full); color:var(--text-2); position:relative;
+}
+.topbar .icon-btn .dot{
+  position:absolute; top:8px; right:8px; width:8px; height:8px;
+  border-radius:var(--r-full); background:var(--danger); border:2px solid var(--surface);
+}
+.section{ padding:16px 20px; }
+.section-title{ font-size:14px; font-weight:700; color:var(--text-3); margin:0 0 12px; }
+.section-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
+.section-head h2{ font-size:18px; font-weight:800; margin:0; letter-spacing:-0.3px; }
+.section-head .more{ font-size:14px; color:var(--text-3); font-weight:600; }
+
+/* ═══════════════════════════════════════════
+   보호자 화면 전용 스타일
+   ═══════════════════════════════════════════ */
+.guard-user-card{
+  background:var(--surface); margin:12px 20px 0;
+  border-radius:var(--r-xl); padding:14px 16px;
+  display:flex; align-items:center; gap:12px;
+  box-shadow:var(--shadow-sm);
+  border:2px solid var(--brand-soft);
+}
+.guard-user-card .av{
+  width:44px; height:44px; border-radius:50%;
+  background:linear-gradient(135deg,#3182F6,#5BA0FF);
+  color:#fff; display:grid; place-items:center;
+  font-size:18px; font-weight:800; flex-shrink:0;
+}
+.guard-user-card .guc-name{ font-size:15px; font-weight:800; }
+.guard-user-card .guc-sub{ font-size:12px; color:var(--text-3); font-weight:600; margin-top:2px; }
+.guard-user-card .online{
+  width:10px; height:10px; border-radius:50%;
+  background:var(--success); margin-left:auto;
+  box-shadow:0 0 0 3px var(--success-soft);
+  flex-shrink:0;
+}
+
+.hero{ padding:8px 20px 16px; background:var(--surface); }
+.hero .greet{ font-size:14px; color:var(--text-3); font-weight:600; margin-bottom:4px; }
+.hero .name{ font-size:24px; font-weight:800; letter-spacing:-0.5px; margin-bottom:14px; }
+.hero .name span{ color:var(--brand); }
+
+.status-banner{
+  display:flex; align-items:center; gap:12px;
+  padding:14px 16px; border-radius:var(--r-lg);
+  background:var(--success-soft); color:#0E8C50;
+  font-size:15px; font-weight:700;
+}
+.status-banner.danger{ background:var(--danger-soft); color:var(--danger); }
+.status-banner.warning{ background:var(--warning-soft); color:var(--warning); }
+.status-banner .icon{
+  width:32px; height:32px; border-radius:var(--r-full);
+  display:grid; place-items:center; background:rgba(255,255,255,0.7); font-size:16px; flex-shrink:0;
+}
+.status-banner .meta{ margin-left:auto; font-size:13px; font-weight:600; opacity:0.8; }
+
+.action-grid{
+  display:grid; grid-template-columns:repeat(4,1fr); gap:4px;
+  background:var(--surface); border-radius:var(--r-xl);
+  padding:16px 4px; box-shadow:var(--shadow-sm);
+}
+.action{ display:flex; flex-direction:column; align-items:center; gap:6px; padding:8px 0; border-radius:var(--r-md); }
+.action:active{ background:var(--surface-2); }
+.action .ic{ width:44px; height:44px; border-radius:var(--r-lg); background:var(--brand-soft); color:var(--brand); display:grid; place-items:center; font-size:20px; }
+.action .ic.warn{ background:var(--warning-soft); color:var(--warning); }
+.action .ic.dan{ background:var(--danger-soft); color:var(--danger); }
+.action .ic.suc{ background:var(--success-soft); color:var(--success); }
+.action .lab{ font-size:13px; font-weight:700; color:var(--text-2); }
+
+.med-card{ background:var(--surface); border-radius:var(--r-xl); padding:18px 20px; box-shadow:var(--shadow-sm); }
+.med-row{ display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
+.med-row .title{ font-size:17px; font-weight:800; }
+.med-row .count{ font-size:14px; font-weight:700; color:var(--brand); }
+.med-progress{ height:8px; background:var(--surface-2); border-radius:var(--r-full); overflow:hidden; margin-bottom:14px; }
+.med-progress .bar{ height:100%; background:linear-gradient(90deg,#3182F6,#5BA0FF); border-radius:var(--r-full); }
+.next-med{ display:flex; align-items:center; gap:12px; padding:12px; border-radius:var(--r-md); background:var(--surface-2); }
+.next-med .pill{ width:36px; height:36px; border-radius:10px; background:var(--brand-soft); color:var(--brand); display:grid; place-items:center; font-size:18px; }
+.next-med .info{ flex:1; }
+.next-med .info .n{ font-size:15px; font-weight:700; }
+.next-med .info .t{ font-size:13px; color:var(--text-3); font-weight:600; margin-top:2px; }
+.next-med .btn-take{ padding:8px 14px; border-radius:var(--r-md); background:var(--brand); color:#fff; font-size:13px; font-weight:700; }
+
+.sensor-card{ background:var(--surface); border-radius:var(--r-xl); padding:16px; box-shadow:var(--shadow-sm); }
+.sensor-grid{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+.sensor-item{ padding:14px; border-radius:var(--r-md); background:var(--surface-2); display:flex; align-items:center; gap:12px; }
+.sensor-item .ic{ width:40px; height:40px; border-radius:var(--r-full); background:var(--success-soft); color:var(--success); display:grid; place-items:center; font-size:18px; }
+.sensor-item.alert .ic{ background:var(--danger-soft); color:var(--danger); }
+.sensor-item .text .name{ font-size:13px; color:var(--text-3); font-weight:700; }
+.sensor-item .text .st{ font-size:14px; font-weight:700; color:var(--success); margin-top:2px; }
+.sensor-item.alert .text .st{ color:var(--danger); }
+
+.cam-frame{ background:#000; border-radius:var(--r-xl); aspect-ratio:4/3; position:relative; overflow:hidden; display:grid; place-items:center; box-shadow:var(--shadow-md); }
+.cam-frame .placeholder{ color:rgba(255,255,255,0.45); font-size:14px; text-align:center; font-weight:600; }
+.cam-frame .placeholder .big{ font-size:36px; margin-bottom:8px; opacity:0.7; }
+.live-pill{ position:absolute; top:12px; left:12px; padding:6px 10px; background:rgba(0,0,0,0.55); backdrop-filter:blur(6px); border-radius:var(--r-full); color:#fff; font-size:11px; font-weight:800; letter-spacing:0.5px; display:flex; align-items:center; gap:6px; }
+.live-dot{ width:7px; height:7px; border-radius:50%; background:#FF3B30; animation:pulse 1.4s infinite; }
+@keyframes pulse{ 0%,100%{opacity:1;transform:scale(1);}50%{opacity:.4;transform:scale(1.15);} }
+.live-info{ position:absolute; bottom:12px; left:12px; right:12px; display:flex; align-items:center; justify-content:space-between; color:rgba(255,255,255,0.85); font-size:12px; font-weight:600; }
+.stat-row{ display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:16px; }
+.stat-mini{ background:var(--surface); border-radius:var(--r-lg); padding:14px 12px; text-align:center; box-shadow:var(--shadow-sm); }
+.stat-mini .l{ font-size:12px; color:var(--text-3); font-weight:700; }
+.stat-mini .v{ font-size:20px; font-weight:800; margin-top:4px; }
+.stat-mini.danger .v{ color:var(--danger); }
+.stat-mini.success .v{ color:var(--success); }
+
+.alert-list{ display:flex; flex-direction:column; gap:8px; }
+.alert{ background:var(--surface); border-radius:var(--r-lg); padding:14px 16px; display:flex; align-items:flex-start; gap:12px; box-shadow:var(--shadow-sm); }
+.alert .ic{ width:36px; height:36px; border-radius:var(--r-full); display:grid; place-items:center; flex-shrink:0; background:var(--surface-2); font-size:16px; }
+.alert.danger .ic{ background:var(--danger-soft); color:var(--danger); }
+.alert.warning .ic{ background:var(--warning-soft); color:var(--warning); }
+.alert.info .ic{ background:var(--brand-soft); color:var(--brand); }
+.alert .body{ flex:1; min-width:0; }
+.alert .body .top{ display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; }
+.alert .body .tag{ display:inline-block; padding:2px 8px; border-radius:var(--r-full); background:var(--surface-2); font-size:11px; font-weight:700; color:var(--text-2); }
+.alert.danger .body .tag{ background:var(--danger-soft); color:var(--danger); }
+.alert.warning .body .tag{ background:var(--warning-soft); color:var(--warning); }
+.alert .body .time{ font-size:12px; color:var(--text-3); font-weight:600; }
+.alert .body .msg{ font-size:14px; font-weight:600; color:var(--text-1); line-height:1.4; }
+.alert .resolve{ margin-top:8px; padding:6px 12px; border-radius:var(--r-md); background:var(--text-1); color:#fff; font-size:12px; font-weight:700; }
+.alert.resolved{ opacity:0.55; }
+.alert.resolved .body .tag{ background:var(--success-soft); color:var(--success); }
+
+.tabbar{ background:var(--surface); padding:0 20px; display:flex; gap:24px; border-bottom:1px solid var(--line); position:sticky; top:56px; z-index:5; }
+.tab{ padding:14px 0; font-size:15px; font-weight:700; color:var(--text-3); border-bottom:2px solid transparent; display:flex; align-items:center; gap:6px; }
+.tab.active{ color:var(--text-1); border-bottom-color:var(--text-1); }
+.tab .badge{ background:var(--danger); color:#fff; font-size:11px; font-weight:800; min-width:18px; height:18px; border-radius:var(--r-full); display:grid; place-items:center; padding:0 5px; }
+.chips{ display:flex; gap:6px; padding:12px 20px; overflow-x:auto; }
+.chips::-webkit-scrollbar{ display:none; }
+.chip{ padding:8px 14px; border-radius:var(--r-full); background:var(--surface); border:1px solid var(--line); font-size:13px; font-weight:700; color:var(--text-2); white-space:nowrap; }
+.chip.active{ background:var(--text-1); color:#fff; border-color:var(--text-1); }
+.day-header{ font-size:12px; font-weight:700; color:var(--text-3); padding:16px 20px 8px; }
+.chat-card{ background:var(--surface); margin:0 20px 8px; border-radius:var(--r-lg); padding:14px 16px; box-shadow:var(--shadow-sm); }
+.chat-card .top{ display:flex; justify-content:space-between; align-items:center; margin-bottom:6px; }
+.chat-card .who{ font-size:13px; font-weight:700; color:var(--brand); display:flex; align-items:center; gap:6px; }
+.chat-card .who .av{ width:22px; height:22px; border-radius:var(--r-full); background:var(--brand-soft); display:grid; place-items:center; font-size:12px; }
+.chat-card .when{ font-size:12px; color:var(--text-3); font-weight:600; }
+.chat-card .msg{ font-size:14px; color:var(--text-1); line-height:1.5; }
+
+.med-hero{ background:linear-gradient(135deg,#3182F6 0%,#5BA0FF 100%); border-radius:var(--r-xl); padding:22px; color:#fff; box-shadow:0 8px 20px rgba(49,130,246,0.25); }
+.med-hero .label{ font-size:13px; opacity:0.9; font-weight:600; }
+.med-hero .pct{ font-size:44px; font-weight:800; letter-spacing:-1.5px; margin:4px 0; }
+.med-hero .sub{ font-size:14px; opacity:0.9; font-weight:600; }
+.med-hero .ring{ margin-top:12px; height:10px; background:rgba(255,255,255,0.25); border-radius:var(--r-full); overflow:hidden; }
+.med-hero .ring .fill{ height:100%; background:#fff; border-radius:var(--r-full); width:67%; }
+
+.pill-card{ background:var(--surface); border-radius:var(--r-lg); padding:16px; display:flex; align-items:center; gap:14px; margin-bottom:8px; box-shadow:var(--shadow-sm); }
+.pill-card .time-block{ text-align:center; min-width:64px; padding:10px 0; border-radius:var(--r-md); background:var(--surface-2); }
+.pill-card .time-block .hh{ font-size:18px; font-weight:800; }
+.pill-card .time-block .ap{ font-size:11px; color:var(--text-3); font-weight:700; }
+.pill-card .info{ flex:1; }
+.pill-card .info .nm{ font-size:15px; font-weight:700; }
+.pill-card .info .dose{ font-size:13px; color:var(--text-3); font-weight:600; margin-top:2px; }
+.pill-card .check{ width:32px; height:32px; border-radius:var(--r-full); border:2px solid var(--line-strong); display:grid; place-items:center; color:transparent; }
+.pill-card.done .check{ border-color:var(--success); background:var(--success); color:#fff; }
+.pill-card.done .info .nm{ text-decoration:line-through; color:var(--text-3); }
+
+.cal-row{ display:grid; grid-template-columns:repeat(7,1fr); gap:4px; padding:8px 20px 0; }
+.cal-day{ aspect-ratio:1; display:flex; flex-direction:column; align-items:center; justify-content:center; border-radius:var(--r-md); font-size:13px; color:var(--text-2); font-weight:700; }
+.cal-day .dow{ font-size:10px; color:var(--text-3); margin-bottom:2px; font-weight:700; }
+.cal-day.active{ background:var(--text-1); color:#fff; }
+.cal-day.active .dow{ color:rgba(255,255,255,0.7); }
+.cal-day.has-event::after{ content:''; width:4px; height:4px; border-radius:50%; background:var(--brand); margin-top:3px; }
+.cal-day.active.has-event::after{ background:#fff; }
+.event{ background:var(--surface); border-radius:var(--r-lg); padding:16px; display:flex; gap:14px; margin-bottom:8px; box-shadow:var(--shadow-sm); position:relative; overflow:hidden; }
+.event::before{ content:''; position:absolute; left:0; top:16px; bottom:16px; width:3px; background:var(--brand); border-radius:0 4px 4px 0; }
+.event.warn::before{ background:var(--warning); }
+.event.suc::before{ background:var(--success); }
+.event .t{ font-size:14px; font-weight:800; color:var(--text-1); min-width:54px; }
+.event .b .ttl{ font-size:15px; font-weight:700; }
+.event .b .desc{ font-size:13px; color:var(--text-3); font-weight:600; margin-top:2px; }
+
+.profile{ background:var(--surface); padding:24px 20px; display:flex; align-items:center; gap:16px; border-bottom:1px solid var(--line); }
+.profile .av{ width:64px; height:64px; border-radius:var(--r-full); background:linear-gradient(135deg,#3182F6,#5BA0FF); color:#fff; display:grid; place-items:center; font-size:26px; font-weight:800; }
+.profile .info .name{ font-size:19px; font-weight:800; }
+.profile .info .sub{ font-size:13px; color:var(--text-3); font-weight:600; margin-top:2px; }
+.menu-list{ background:var(--surface); margin:12px 0; }
+.menu-item{ padding:16px 20px; display:flex; align-items:center; gap:14px; border-bottom:1px solid var(--line); width:100%; text-align:left; }
+.menu-item:last-child{ border-bottom:none; }
+.menu-item .ic{ width:36px; height:36px; border-radius:var(--r-md); background:var(--surface-2); color:var(--text-2); display:grid; place-items:center; font-size:16px; }
+.menu-item .lab{ flex:1; font-size:15px; font-weight:600; }
+.menu-item .arr{ color:var(--text-4); font-size:14px; }
+.menu-item .toggle{ width:44px; height:26px; border-radius:var(--r-full); background:var(--line-strong); position:relative; }
+.menu-item .toggle::after{ content:''; position:absolute; top:2px; left:2px; width:22px; height:22px; border-radius:50%; background:#fff; box-shadow:0 1px 3px rgba(0,0,0,0.2); transition:left 0.2s; }
+.menu-item .toggle.on{ background:var(--brand); }
+.menu-item .toggle.on::after{ left:20px; }
+
+/* 보호자 하단 내비 (5개) */
+.guard-nav{
+  flex-shrink:0; background:var(--surface); border-top:1px solid var(--line);
+  padding:8px 0 24px; display:grid; grid-template-columns:repeat(5,1fr);
+}
+.guard-nav .nav-item{ display:flex; flex-direction:column; align-items:center; gap:4px; padding:6px 0; color:var(--text-3); font-size:11px; font-weight:700; position:relative; }
+.guard-nav .nav-item .ic{ font-size:22px; }
+.guard-nav .nav-item.active{ color:var(--text-1); }
+.guard-nav .nav-item .nb{ position:absolute; top:0; right:26%; background:var(--danger); color:#fff; font-size:10px; font-weight:800; min-width:16px; height:16px; border-radius:var(--r-full); display:grid; place-items:center; padding:0 4px; border:2px solid var(--surface); }
+
+/* ═══════════════════════════════════════════
+   노인 사용자 화면 전용 스타일
+   ═══════════════════════════════════════════ */
+
+/* 시니어 상단바 */
+.s-topbar{
+  background:var(--surface); padding:14px 20px 16px;
+  display:flex; align-items:center; justify-content:space-between;
+  position:sticky; top:0; z-index:10;
+  border-bottom:1px solid var(--line);
+}
+.s-topbar h1{ font-size:var(--sf-lg); font-weight:800; letter-spacing:-0.4px; margin:0; }
+.s-topbar .icon-btn{ width:52px; height:52px; display:grid; place-items:center; border-radius:var(--r-full); color:var(--text-2); font-size:26px; position:relative; }
+.s-topbar .icon-btn .dot{ position:absolute; top:8px; right:8px; width:10px; height:10px; border-radius:var(--r-full); background:var(--danger); border:2px solid var(--surface); }
+
+/* 날짜·인사 카드 */
+.s-date-card{
+  margin:16px 20px 0;
+  background:linear-gradient(135deg,#4FA8FF 0%,#7B6FFF 100%);
+  border-radius:var(--r-xl); padding:24px 22px; color:#fff;
+  box-shadow:0 8px 24px rgba(99,124,255,0.25);
+}
+.s-date-card .s-date{ font-size:var(--sf-xs); font-weight:600; opacity:0.9; margin-bottom:6px; }
+.s-date-card .s-greet{ font-size:var(--sf-xl); font-weight:800; line-height:1.2; letter-spacing:-0.5px; margin-bottom:12px; }
+.s-date-card .s-ok{ display:inline-flex; align-items:center; gap:6px; background:rgba(255,255,255,0.2); padding:8px 14px; border-radius:var(--r-full); font-size:var(--sf-xs); font-weight:700; }
+
+/* 큰 액션 타일 */
+.s-action-grid{ display:grid; grid-template-columns:1fr 1fr; gap:12px; padding:16px 20px; }
+.s-tile{
+  background:var(--surface); border-radius:var(--r-xl);
+  padding:22px 14px; display:flex; flex-direction:column; align-items:center; gap:10px;
+  box-shadow:var(--shadow-md); border:none; font-family:inherit; text-align:center; cursor:pointer;
+}
+.s-tile:active{ transform:scale(0.97); }
+.s-tile .s-ic{ width:60px; height:60px; border-radius:20px; background:var(--brand-soft); color:var(--brand); display:grid; place-items:center; font-size:30px; }
+.s-tile .s-ic.med{ background:var(--success-soft); color:var(--success); }
+.s-tile .s-ic.sched{ background:var(--warning-soft); color:var(--warning); }
+.s-tile .s-label{ font-size:var(--sf-sm); font-weight:800; color:var(--text-1); }
+.s-tile .s-sub{ font-size:var(--sf-xs); color:var(--text-3); font-weight:600; }
+
+/* 긴급통화 큰 버튼 (홈) */
+.s-sos-strip{
+  margin:0 20px; display:flex; align-items:center; gap:16px;
+  background:linear-gradient(135deg,#F04452,#FF6B6B);
+  border-radius:var(--r-xl); padding:20px 22px; color:#fff;
+  border:none; font-family:inherit; cursor:pointer; width:calc(100% - 40px);
+  box-shadow:0 8px 24px rgba(240,68,82,0.3);
+}
+.s-sos-strip:active{ transform:scale(0.98); }
+.s-sos-strip .sos-ic{ width:56px; height:56px; border-radius:50%; background:rgba(255,255,255,0.2); display:grid; place-items:center; font-size:28px; flex-shrink:0; }
+.s-sos-strip .sos-title{ font-size:var(--sf-lg); font-weight:800; letter-spacing:-0.3px; }
+.s-sos-strip .sos-sub{ font-size:var(--sf-xs); opacity:0.9; font-weight:600; margin-top:3px; }
+
+/* 시니어 복약 상태 카드 */
+.s-med-card{ margin:16px 20px 0; background:var(--surface); border-radius:var(--r-xl); padding:20px; box-shadow:var(--shadow-sm); }
+.s-med-card .s-mc-title{ font-size:var(--sf-md); font-weight:800; margin-bottom:12px; display:flex; align-items:center; gap:8px; }
+.s-med-card .s-prog{ background:var(--surface-2); border-radius:var(--r-full); height:14px; overflow:hidden; margin-bottom:10px; }
+.s-med-card .s-prog-fill{ height:100%; background:linear-gradient(90deg,var(--success),#4FD18E); border-radius:var(--r-full); }
+.s-med-card .s-mc-sub{ font-size:var(--sf-sm); font-weight:700; color:var(--success); }
+
+/* 시니어 일정 미리보기 */
+.s-sched-card{ margin:14px 20px 0; background:var(--surface); border-radius:var(--r-xl); padding:20px; box-shadow:var(--shadow-sm); }
+.s-sched-card .s-sc-title{ font-size:var(--sf-md); font-weight:800; margin-bottom:14px; }
+.s-sched-item{ display:flex; align-items:flex-start; gap:14px; padding:12px 0; border-bottom:1px solid var(--line); }
+.s-sched-item:last-child{ border-bottom:none; }
+.s-sched-item .s-si-time{ font-size:var(--sf-sm); font-weight:800; color:var(--brand); min-width:52px; flex-shrink:0; }
+.s-sched-item .s-si-name{ font-size:var(--sf-sm); font-weight:700; color:var(--text-1); }
+.s-sched-item .s-si-loc{ font-size:var(--sf-xs); color:var(--text-3); font-weight:600; margin-top:3px; }
+
+/* 시니어 섹션 타이틀 */
+.s-sec-title{ font-size:var(--sf-md); font-weight:800; padding:16px 20px 10px; margin:0; }
+
+/* 시니어 복약 카드 */
+.s-pill{
+  background:var(--surface); margin:0 20px 10px;
+  border-radius:var(--r-xl); padding:18px 20px;
+  display:flex; align-items:center; gap:16px;
+  box-shadow:var(--shadow-sm); border:none; font-family:inherit;
+  width:calc(100% - 40px); text-align:left; cursor:pointer;
+}
+.s-pill:active{ background:var(--surface-2); }
+.s-pill .sp-ic{ width:54px; height:54px; border-radius:18px; background:var(--brand-soft); color:var(--brand); display:grid; place-items:center; font-size:26px; flex-shrink:0; }
+.s-pill.done .sp-ic{ background:var(--success-soft); color:var(--success); }
+.s-pill .sp-info{ flex:1; }
+.s-pill .sp-info .sp-name{ font-size:var(--sf-md); font-weight:800; color:var(--text-1); }
+.s-pill.done .sp-info .sp-name{ text-decoration:line-through; color:var(--text-3); }
+.s-pill .sp-info .sp-time{ font-size:var(--sf-xs); color:var(--text-3); font-weight:600; margin-top:4px; }
+.s-pill .sp-check{ width:50px; height:50px; border-radius:50%; border:3px solid var(--line-strong); display:grid; place-items:center; font-size:22px; color:transparent; flex-shrink:0; }
+.s-pill.done .sp-check{ border-color:var(--success); background:var(--success); color:#fff; }
+
+/* 시니어 일정 페이지 이벤트 카드 */
+.s-event{
+  background:var(--surface); margin:0 20px 12px;
+  border-radius:var(--r-xl); padding:22px 20px;
+  box-shadow:var(--shadow-sm); position:relative; overflow:hidden;
+}
+.s-event::before{ content:''; position:absolute; left:0; top:0; bottom:0; width:5px; background:var(--brand); }
+.s-event.warn::before{ background:var(--warning); }
+.s-event.suc::before{ background:var(--success); }
+.s-ev-time{ font-size:var(--sf-sm); font-weight:800; color:var(--brand); margin-bottom:5px; }
+.s-event.warn .s-ev-time{ color:var(--warning); }
+.s-event.suc .s-ev-time{ color:var(--success); }
+.s-ev-name{ font-size:var(--sf-lg); font-weight:800; letter-spacing:-0.3px; margin-bottom:5px; }
+.s-ev-loc{ font-size:var(--sf-xs); color:var(--text-3); font-weight:600; }
+
+/* 긴급 통화 페이지 */
+.s-sos-page{ display:flex; flex-direction:column; align-items:center; padding:20px; gap:18px; }
+.s-sos-page .s-sos-headline{ font-size:var(--sf-lg); font-weight:800; text-align:center; letter-spacing:-0.3px; line-height:1.3; }
+.s-sos-big{
+  width:190px; height:190px; border-radius:50%;
+  background:linear-gradient(135deg,#F04452,#FF6B6B);
+  border:none; cursor:pointer;
+  display:flex; flex-direction:column; align-items:center; justify-content:center; gap:8px;
+  box-shadow:0 12px 36px rgba(240,68,82,0.4),0 0 0 10px rgba(240,68,82,0.1);
+  color:#fff;
+}
+.s-sos-big:active{ transform:scale(0.95); }
+.s-sos-big .sos-emoji{ font-size:56px; }
+.s-sos-big .sos-lab{ font-size:var(--sf-lg); font-weight:800; font-family:inherit; }
+.s-contacts{ width:100%; display:flex; flex-direction:column; gap:10px; }
+.s-contacts .s-ct-head{ font-size:var(--sf-xs); font-weight:800; color:var(--text-3); padding-bottom:4px; }
+.s-contact{
+  background:var(--surface); border-radius:var(--r-xl); padding:16px 18px;
+  display:flex; align-items:center; gap:14px;
+  box-shadow:var(--shadow-sm); border:none; font-family:inherit; width:100%; cursor:pointer;
+}
+.s-contact:active{ background:var(--surface-2); }
+.s-contact .c-av{ width:54px; height:54px; border-radius:50%; background:linear-gradient(135deg,#3182F6,#5BA0FF); color:#fff; display:grid; place-items:center; font-size:22px; font-weight:800; flex-shrink:0; }
+.s-contact .c-av.em{ background:linear-gradient(135deg,#F04452,#FF6B6B); }
+.s-contact .c-info{ flex:1; text-align:left; }
+.s-contact .c-name{ font-size:var(--sf-md); font-weight:800; color:var(--text-1); }
+.s-contact .c-rel{ font-size:var(--sf-xs); color:var(--text-3); font-weight:600; margin-top:3px; }
+.s-contact .c-call{ font-size:30px; }
+
+/* 시니어 설정 */
+.s-profile{ background:var(--surface); padding:28px 20px; display:flex; align-items:center; gap:18px; border-bottom:1px solid var(--line); }
+.s-profile .s-av{ width:76px; height:76px; border-radius:50%; background:linear-gradient(135deg,#3182F6,#5BA0FF); color:#fff; display:grid; place-items:center; font-size:32px; font-weight:800; }
+.s-profile .s-pname{ font-size:var(--sf-lg); font-weight:800; }
+.s-profile .s-psub{ font-size:var(--sf-xs); color:var(--text-3); font-weight:600; margin-top:4px; }
+.s-menu-list{ background:var(--surface); margin:12px 0; }
+.s-menu-item{ padding:20px; display:flex; align-items:center; gap:16px; border-bottom:1px solid var(--line); width:100%; text-align:left; background:none; font-family:inherit; cursor:pointer; }
+.s-menu-item:last-child{ border-bottom:none; }
+.s-menu-item .sm-ic{ width:46px; height:46px; border-radius:var(--r-md); background:var(--surface-2); color:var(--text-2); display:grid; place-items:center; font-size:22px; flex-shrink:0; }
+.s-menu-item .sm-lab{ flex:1; font-size:var(--sf-md); font-weight:700; color:var(--text-1); }
+.s-menu-item .sm-arr{ color:var(--text-4); font-size:20px; }
+.s-menu-item .sm-toggle{ width:54px; height:32px; border-radius:var(--r-full); background:var(--line-strong); position:relative; flex-shrink:0; transition:background 0.2s; }
+.s-menu-item .sm-toggle::after{ content:''; position:absolute; top:4px; left:4px; width:24px; height:24px; border-radius:50%; background:#fff; box-shadow:0 1px 4px rgba(0,0,0,0.2); transition:left 0.2s; }
+.s-menu-item .sm-toggle.on{ background:var(--brand); }
+.s-menu-item .sm-toggle.on::after{ left:26px; }
+
+/* 모드 안내 배너 */
+.s-mode-banner{ margin:12px 20px; border-radius:var(--r-lg); padding:14px 16px; display:flex; align-items:center; gap:10px; font-size:var(--sf-xs); font-weight:700; background:var(--brand-soft); color:var(--brand); }
+
+/* ══ 어르신 선택 화면 (앱 진입 첫 화면) ════════════════════════ */
+.sel-page{
+  display:flex; flex-direction:column;
+  align-items:center;
+  background:var(--bg);
+  min-height:100%;
+  padding:0 0 32px;
+}
+.sel-topbar{
+  width:100%; background:var(--surface);
+  padding:14px 20px 16px;
+  border-bottom:1px solid var(--line);
+  display:flex; align-items:center; justify-content:space-between;
+}
+.sel-topbar .app-name{ font-size:22px; font-weight:900; letter-spacing:-0.5px; color:var(--text-1); }
+.sel-topbar .app-name span{ color:var(--brand); }
+.sel-topbar .icon-btn{ width:40px; height:40px; display:grid; place-items:center; border-radius:var(--r-full); color:var(--text-2); font-size:20px; position:relative; }
+.sel-topbar .icon-btn .dot{ position:absolute; top:8px; right:8px; width:8px; height:8px; border-radius:50%; background:var(--danger); border:2px solid var(--surface); }
+
+.sel-greeting{
+  width:100%; padding:20px 20px 0;
+  display:flex; flex-direction:column; gap:2px;
+}
+.sel-greeting .sub{ font-size:14px; color:var(--text-3); font-weight:600; }
+.sel-greeting .title{ font-size:22px; font-weight:800; letter-spacing:-0.4px; color:var(--text-1); }
+
+.sel-grid{
+  display:grid; grid-template-columns:1fr 1fr;
+  gap:14px; padding:20px 20px 0; width:100%;
+}
+
+/* 어르신 선택 카드 */
+.sel-card{
+  background:var(--surface); border-radius:var(--r-xl);
+  padding:20px 14px 18px;
+  display:flex; flex-direction:column; align-items:center; gap:10px;
+  box-shadow:var(--shadow-md);
+  border:2.5px solid transparent;
+  cursor:pointer; border:none; font-family:inherit;
+  position:relative; overflow:hidden;
+  box-shadow:var(--shadow-md);
+}
+.sel-card:active{ transform:scale(0.97); }
+
+/* 상태별 상단 포인트 라인 */
+.sel-card::before{
+  content:''; position:absolute; top:0; left:0; right:0; height:4px;
+  background:var(--success);
+}
+.sel-card.warn::before{ background:var(--warning); }
+.sel-card.danger::before{ background:var(--danger); }
+
+.sel-av-wrap{ position:relative; margin-top:4px; }
+.sel-av{
+  width:72px; height:72px; border-radius:50%;
+  background:linear-gradient(135deg,#3182F6,#5BA0FF);
+  color:#fff; display:grid; place-items:center;
+  font-size:28px; font-weight:900;
+}
+.sel-av.pink{ background:linear-gradient(135deg,#FF7BAC,#FFB3CC); }
+
+/* 온라인 상태 점 */
+.sel-online{
+  position:absolute; bottom:2px; right:2px;
+  width:16px; height:16px; border-radius:50%;
+  background:var(--success);
+  border:2.5px solid var(--surface);
+}
+.sel-online.warn{ background:var(--warning); }
+.sel-online.danger{ background:var(--danger); }
+
+.sel-name{ font-size:15px; font-weight:800; color:var(--text-1); letter-spacing:-0.2px; }
+.sel-label{ font-size:12px; color:var(--text-3); font-weight:600; margin-top:-4px; }
+
+/* 미니 상태 배지 */
+.sel-status{
+  display:flex; align-items:center; gap:4px;
+  padding:4px 10px; border-radius:var(--r-full);
+  font-size:11px; font-weight:800;
+  background:var(--success-soft); color:var(--success);
+}
+.sel-status.warn{ background:var(--warning-soft); color:var(--warning); }
+.sel-status.danger{ background:var(--danger-soft); color:var(--danger); }
+
+/* 어르신 추가 카드 */
+.sel-add{
+  background:var(--surface); border-radius:var(--r-xl);
+  padding:20px 14px 18px;
+  display:flex; flex-direction:column; align-items:center; gap:10px;
+  border:2px dashed var(--line-strong);
+  cursor:pointer; font-family:inherit;
+}
+.sel-add:active{ background:var(--surface-2); }
+.sel-add-ic{
+  width:72px; height:72px; border-radius:50%;
+  background:var(--surface-2); display:grid; place-items:center;
+  font-size:28px; color:var(--text-4); margin-top:4px;
+}
+.sel-add-label{ font-size:14px; font-weight:700; color:var(--text-3); }
+
+/* 하단 보호자 정보 */
+.sel-footer{
+  margin-top:24px;
+  display:flex; align-items:center; gap:10px;
+  background:var(--surface); border-radius:var(--r-full);
+  padding:10px 16px 10px 10px;
+  box-shadow:var(--shadow-sm);
+}
+.sel-footer .f-av{
+  width:32px; height:32px; border-radius:50%;
+  background:linear-gradient(135deg,#3182F6,#5BA0FF);
+  color:#fff; display:grid; place-items:center;
+  font-size:13px; font-weight:800;
+}
+.sel-footer .f-info .f-name{ font-size:13px; font-weight:800; color:var(--text-1); }
+.sel-footer .f-info .f-sub{ font-size:11px; color:var(--text-3); font-weight:600; }
+.sel-footer .f-logout{ font-size:12px; font-weight:700; color:var(--text-4); margin-left:8px; }
+
+/* ══ 보호자 멀티 어르신 오버뷰 카드 ══════════════════════════════ */
+.ov-greeting{
+  background:var(--surface); padding:16px 20px 12px;
+  border-bottom:1px solid var(--line);
+}
+.ov-greeting .date{ font-size:13px; color:var(--text-3); font-weight:600; margin-bottom:4px; }
+.ov-greeting .name{ font-size:20px; font-weight:800; letter-spacing:-0.4px; }
+.ov-greeting .name span{ color:var(--brand); }
+
+.ov-summary{
+  display:flex; gap:8px; padding:12px 20px;
+  background:var(--surface); border-bottom:1px solid var(--line);
+}
+.ov-chip{
+  flex:1; border-radius:var(--r-lg); padding:10px 12px;
+  display:flex; flex-direction:column; gap:2px; background:var(--surface-2);
+}
+.ov-chip .oc-label{ font-size:11px; font-weight:700; color:var(--text-3); }
+.ov-chip .oc-val{ font-size:18px; font-weight:800; color:var(--text-1); }
+.ov-chip.danger{ background:var(--danger-soft); }
+.ov-chip.danger .oc-val{ color:var(--danger); }
+.ov-chip.warning{ background:var(--warning-soft); }
+.ov-chip.warning .oc-val{ color:var(--warning); }
+.ov-chip.success .oc-val{ color:var(--success); }
+
+.ov-sec-title{
+  font-size:13px; font-weight:800; color:var(--text-3);
+  padding:14px 20px 8px; letter-spacing:-0.1px;
+}
+
+/* 어르신 카드 */
+.ov-card{
+  background:var(--surface); margin:0 20px 12px;
+  border-radius:var(--r-xl); overflow:hidden;
+  box-shadow:var(--shadow-md); cursor:pointer; border:none; font-family:inherit;
+  width:calc(100% - 40px); text-align:left;
+}
+.ov-card:active{ transform:scale(0.99); }
+
+.ov-card-strip{
+  height:5px; background:var(--success);
+}
+.ov-card-strip.warning{ background:var(--warning); }
+.ov-card-strip.danger{ background:var(--danger); }
+
+.ov-card-body{ padding:16px 18px; }
+.ov-card-top{
+  display:flex; align-items:center; justify-content:space-between;
+  margin-bottom:12px;
+}
+.ov-card-left{ display:flex; align-items:center; gap:12px; }
+.ov-av{
+  width:44px; height:44px; border-radius:50%;
+  background:linear-gradient(135deg,#3182F6,#5BA0FF);
+  color:#fff; display:grid; place-items:center;
+  font-size:18px; font-weight:800; flex-shrink:0;
+}
+.ov-av.female{ background:linear-gradient(135deg,#FF7BAC,#FF9EC8); }
+.ov-name{ font-size:17px; font-weight:800; letter-spacing:-0.3px; }
+.ov-label{ font-size:12px; color:var(--text-3); font-weight:600; margin-top:2px; }
+.ov-status-badge{
+  padding:4px 10px; border-radius:var(--r-full);
+  font-size:12px; font-weight:800;
+  background:var(--success-soft); color:var(--success);
+}
+.ov-status-badge.warning{ background:var(--warning-soft); color:var(--warning); }
+.ov-status-badge.danger{ background:var(--danger-soft); color:var(--danger); }
+
+.ov-card-stats{
+  display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px;
+  padding-top:12px; border-top:1px solid var(--line);
+}
+.ov-stat{ text-align:center; }
+.ov-stat .os-label{ font-size:11px; color:var(--text-3); font-weight:700; margin-bottom:3px; }
+.ov-stat .os-val{ font-size:16px; font-weight:800; color:var(--text-1); }
+.ov-stat .os-val.danger{ color:var(--danger); }
+.ov-stat .os-val.warning{ color:var(--warning); }
+.ov-stat .os-val.success{ color:var(--success); }
+.ov-stat-div{ width:1px; background:var(--line); margin:2px 0; }
+
+/* 어르신 상세 뷰 상단 바 (뒤로 + 이름) */
+.detail-topbar{
+  background:var(--surface); padding:12px 20px 14px;
+  display:flex; align-items:center; gap:12px;
+  position:sticky; top:0; z-index:10;
+  border-bottom:1px solid var(--line);
+}
+.back-btn{
+  width:36px; height:36px; border-radius:var(--r-full);
+  display:grid; place-items:center;
+  background:var(--surface-2); font-size:18px;
+  flex-shrink:0;
+}
+.detail-topbar .dt-name{ font-size:18px; font-weight:800; flex:1; letter-spacing:-0.3px; }
+.detail-topbar .dt-badge{
+  padding:4px 10px; border-radius:var(--r-full);
+  font-size:11px; font-weight:800;
+  background:var(--warning-soft); color:var(--warning);
+}
+
+/* 시니어 하단 내비 (3개, 큰 아이콘) */
+.senior-nav{
+  flex-shrink:0; background:var(--surface); border-top:1px solid var(--line);
+  padding:8px 0 24px; display:grid; grid-template-columns:repeat(3,1fr);
+}
+.senior-nav .nav-item{ display:flex; flex-direction:column; align-items:center; gap:6px; padding:10px 0; color:var(--text-3); font-size:var(--sf-xs); font-weight:700; }
+.senior-nav .nav-item .ic{ font-size:30px; }
+.senior-nav .nav-item.active{ color:var(--text-1); }
+</style>
+</head>
+<body>
+
+<div class="page-title">
+  <h1>OASIS · 시니어 케어 앱</h1>
+  <p>UI/UX 개선 목업 — 노인 사용자 화면 / 보호자 화면 분리</p>
+</div>
+
+<div class="phones-wrapper">
+
+  <!-- ══════════════════════════════════════════════
+       LEFT : 노인 사용자 화면
+       ══════════════════════════════════════════════ -->
+  <div class="phone-section">
+    <div class="phone-label">
+      <span>👴 노인 사용자 화면</span>
+      <span class="badge">Senior View</span>
+    </div>
+    <div class="mode-switch">
+      <button class="mode-btn active" id="mode-normal-btn" onclick="setSeniorMode('normal')">일반 모드</button>
+      <button class="mode-btn" id="mode-simple-btn" onclick="setSeniorMode('simple')">심플 모드</button>
+    </div>
+
+    <div class="phone" id="senior-phone">
+      <div class="notch"></div>
+      <div class="statusbar">
+        <span>9:41</span>
+        <span class="right"><span>●●●</span><span>📶</span><span>🔋</span></span>
+      </div>
+
+      <div class="pages" id="s-pages">
+
+        <!-- 시니어 홈 -->
+        <div class="page active" id="s-page-home">
+          <div class="s-topbar">
+            <h1>OASIS</h1>
+            <button class="icon-btn" style="font-size:26px;">🔔<span class="dot"></span></button>
+          </div>
+
+          <div class="s-date-card">
+            <div class="s-date">2026년 5월 20일 수요일</div>
+            <div class="s-greet">안녕하세요,<br>김○○ 어르신 😊</div>
+            <div class="s-ok">✅ 오늘도 건강하게 지내세요</div>
+          </div>
+
+          <div class="s-action-grid">
+            <button class="s-tile" onclick="sSwitchPage('med')">
+              <div class="s-ic med">💊</div>
+              <div class="s-label">오늘 복약</div>
+              <div class="s-sub">2/3 완료</div>
+            </button>
+            <button class="s-tile hide-simple" onclick="sSwitchPage('sched')">
+              <div class="s-ic sched">📅</div>
+              <div class="s-label">오늘 일정</div>
+              <div class="s-sub">3건 예정</div>
+            </button>
+          </div>
+
+          <button class="s-sos-strip" onclick="sSwitchPage('sos')">
+            <div class="sos-ic">📞</div>
+            <div>
+              <div class="sos-title">긴급 통화</div>
+              <div class="sos-sub">가족 · 119에 바로 연결</div>
+            </div>
+          </button>
+
+          <div class="s-med-card">
+            <div class="s-mc-title">💊 오늘 복약 현황</div>
+            <div class="s-prog"><div class="s-prog-fill" style="width:67%"></div></div>
+            <div class="s-mc-sub">✅ 3개 중 2개 완료 · 저녁 약이 남았어요</div>
+          </div>
+
+          <div class="s-sched-card hide-simple">
+            <div class="s-sc-title">📅 오늘 일정</div>
+            <div class="s-sched-item">
+              <div class="s-si-time">09:00</div>
+              <div><div class="s-si-name">병원 진료</div><div class="s-si-loc">동아대학교병원 · 내과</div></div>
+            </div>
+            <div class="s-sched-item">
+              <div class="s-si-time">14:00</div>
+              <div><div class="s-si-name">물리치료</div><div class="s-si-loc">사하구 보건소</div></div>
+            </div>
+            <div class="s-sched-item">
+              <div class="s-si-time">18:30</div>
+              <div><div class="s-si-name">가족 식사</div><div class="s-si-loc">아들 가족 방문</div></div>
+            </div>
+          </div>
+
+          <div class="gap-24"></div>
+        </div>
+
+        <!-- 시니어 복약 페이지 -->
+        <div class="page" id="s-page-med">
+          <div class="s-topbar">
+            <h1>💊 오늘 복약</h1>
+          </div>
+
+          <div style="margin:16px 20px; background:linear-gradient(135deg,#00B96B,#4FD18E); border-radius:var(--r-xl); padding:22px; color:#fff; box-shadow:0 8px 20px rgba(0,185,107,0.25);">
+            <div style="font-size:var(--sf-sm); font-weight:600; opacity:0.9; margin-bottom:6px;">오늘 복용 완료</div>
+            <div style="font-size:var(--sf-2xl); font-weight:800; letter-spacing:-1px; line-height:1;">2 / 3</div>
+            <div style="font-size:var(--sf-xs); opacity:0.9; font-weight:600; margin-top:6px;">저녁 약 1개가 남았어요</div>
+            <div style="margin-top:14px; height:14px; background:rgba(255,255,255,0.25); border-radius:100px; overflow:hidden;">
+              <div style="width:67%; height:100%; background:#fff; border-radius:100px;"></div>
+            </div>
+          </div>
+
+          <p class="s-sec-title">복약 목록</p>
+
+          <button class="s-pill done">
+            <div class="sp-ic">✅</div>
+            <div class="sp-info">
+              <div class="sp-name">혈압약</div>
+              <div class="sp-time">오전 8:00 · 아모디핀 1정</div>
+            </div>
+            <div class="sp-check">✓</div>
+          </button>
+          <button class="s-pill done">
+            <div class="sp-ic">✅</div>
+            <div class="sp-info">
+              <div class="sp-name">당뇨약</div>
+              <div class="sp-time">오후 12:30 · 메트포르민 1정</div>
+            </div>
+            <div class="sp-check">✓</div>
+          </button>
+          <button class="s-pill">
+            <div class="sp-ic">💊</div>
+            <div class="sp-info">
+              <div class="sp-name">혈압약 (저녁)</div>
+              <div class="sp-time">오후 7:00 · 아모디핀 1정</div>
+            </div>
+            <div class="sp-check"></div>
+          </button>
+
+          <div class="gap-24"></div>
+        </div>
+
+        <!-- 시니어 일정 페이지 (심플 모드에서 숨김) -->
+        <div class="page hide-simple" id="s-page-sched">
+          <div class="s-topbar">
+            <h1>📅 오늘 일정</h1>
+          </div>
+
+          <p class="s-sec-title">오늘 일정 3건</p>
+
+          <div class="s-event">
+            <div class="s-ev-time">09:00</div>
+            <div class="s-ev-name">병원 진료</div>
+            <div class="s-ev-loc">동아대학교병원 · 내과 김선생님</div>
+          </div>
+          <div class="s-event warn">
+            <div class="s-ev-time">14:00</div>
+            <div class="s-ev-name">물리치료</div>
+            <div class="s-ev-loc">사하구 보건소</div>
+          </div>
+          <div class="s-event suc">
+            <div class="s-ev-time">18:30</div>
+            <div class="s-ev-name">가족 식사</div>
+            <div class="s-ev-loc">아들 가족 방문</div>
+          </div>
+
+          <div class="gap-24"></div>
+        </div>
+
+        <!-- 시니어 긴급 통화 페이지 -->
+        <div class="page" id="s-page-sos">
+          <div class="s-topbar">
+            <h1>📞 긴급 통화</h1>
+          </div>
+
+          <div class="s-sos-page">
+            <p class="s-sos-headline">위급 상황 시<br>아래 버튼을 누르세요</p>
+
+            <button class="s-sos-big">
+              <div class="sos-emoji">🆘</div>
+              <div class="sos-lab">긴급 전화</div>
+            </button>
+
+            <div class="s-contacts">
+              <div class="s-ct-head">연락처</div>
+              <button class="s-contact">
+                <div class="c-av">아</div>
+                <div class="c-info">
+                  <div class="c-name">아들 (김민준)</div>
+                  <div class="c-rel">가족 · 010-1234-5678</div>
+                </div>
+                <div class="c-call">📞</div>
+              </button>
+              <button class="s-contact">
+                <div class="c-av">딸</div>
+                <div class="c-info">
+                  <div class="c-name">딸 (김지연)</div>
+                  <div class="c-rel">가족 · 010-9876-5432</div>
+                </div>
+                <div class="c-call">📞</div>
+              </button>
+              <button class="s-contact">
+                <div class="c-av em">119</div>
+                <div class="c-info">
+                  <div class="c-name">119 응급</div>
+                  <div class="c-rel">소방청 응급 구조</div>
+                </div>
+                <div class="c-call">🚨</div>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <!-- 시니어 설정 페이지 -->
+        <div class="page" id="s-page-settings">
+          <div class="s-topbar">
+            <h1>⚙️ 설정</h1>
+          </div>
+
+          <div class="s-profile">
+            <div class="s-av">김</div>
+            <div>
+              <div class="s-pname">김○○ 어르신</div>
+              <div class="s-psub">노인 사용자 모드</div>
+            </div>
+          </div>
+
+          <div class="s-mode-banner" id="s-mode-banner">
+            ℹ️ 일반 모드 — 모든 기능이 표시됩니다
+          </div>
+
+          <div class="s-menu-list">
+            <button class="s-menu-item" onclick="toggleSeniorMode()">
+              <div class="sm-ic">📱</div>
+              <div class="sm-lab">심플 모드</div>
+              <div class="sm-toggle" id="s-simple-toggle"></div>
+            </button>
+            <button class="s-menu-item">
+              <div class="sm-ic">🔊</div>
+              <div class="sm-lab">알림 소리 크게</div>
+              <div class="sm-toggle on"></div>
+            </button>
+            <button class="s-menu-item">
+              <div class="sm-ic">🔔</div>
+              <div class="sm-lab">복약 알림</div>
+              <div class="sm-toggle on"></div>
+            </button>
+          </div>
+
+          <div class="s-menu-list">
+            <button class="s-menu-item">
+              <div class="sm-ic">👨‍👩‍👧</div>
+              <div class="sm-lab">보호자 연결</div>
+              <div class="sm-arr">›</div>
+            </button>
+            <button class="s-menu-item">
+              <div class="sm-ic">📞</div>
+              <div class="sm-lab">긴급 연락처</div>
+              <div class="sm-arr">›</div>
+            </button>
+          </div>
+
+          <div class="s-menu-list">
+            <button class="s-menu-item">
+              <div class="sm-ic">🚪</div>
+              <div class="sm-lab" style="color:var(--danger)">로그아웃</div>
+              <div class="sm-arr">›</div>
+            </button>
+          </div>
+
+          <div class="gap-24"></div>
+        </div>
+
+      </div><!-- /s-pages -->
+
+      <!-- 시니어 하단 내비 (3개) -->
+      <nav class="senior-nav" id="senior-nav">
+        <button class="nav-item active" onclick="sSwitchPage('home')">
+          <span class="ic">🏠</span><span>홈</span>
+        </button>
+        <button class="nav-item" onclick="sSwitchPage('med')">
+          <span class="ic">💊</span><span>복약</span>
+        </button>
+        <button class="nav-item" onclick="sSwitchPage('sos')">
+          <span class="ic">📞</span><span>긴급</span>
+        </button>
+      </nav>
+    </div>
+  </div>
+
+
+  <!-- ══════════════════════════════════════════════
+       RIGHT : 보호자 화면
+       ══════════════════════════════════════════════ -->
+  <div class="phone-section">
+    <div class="phone-label">
+      <span>👪 보호자 화면</span>
+      <span class="badge g">Guardian View</span>
+    </div>
+    <!-- 높이 맞춤 (시니어 쪽 mode-switch 공간) -->
+    <div style="height:48px;"></div>
+
+    <div class="phone">
+      <div class="notch"></div>
+      <div class="statusbar">
+        <span>9:41</span>
+        <span class="right"><span>●●●</span><span>📶</span><span>🔋</span></span>
+      </div>
+
+      <div class="pages" id="g-pages">
+
+        <!-- 어르신 선택 화면 (앱 진입 첫 화면) -->
+        <div class="page active" id="page-select">
+          <div class="sel-page">
+            <div class="sel-topbar">
+              <div class="app-name">OA<span>SIS</span></div>
+              <button class="icon-btn">🔔<span class="dot"></span></button>
+            </div>
+
+            <div class="sel-greeting">
+              <div class="sub">보호자 김다혜님, 안녕하세요 👋</div>
+              <div class="title">어르신을 선택해주세요</div>
+            </div>
+
+            <div class="sel-grid">
+              <!-- 어르신 1 -->
+              <button class="sel-card danger" onclick="gSelectSenior('senior1')">
+                <div class="sel-av-wrap">
+                  <div class="sel-av">김</div>
+                  <div class="sel-online danger"></div>
+                </div>
+                <div class="sel-name">김○○ 어르신</div>
+                <div class="sel-label">어머니</div>
+                <div class="sel-status danger">⚠️ 알림 2건</div>
+              </button>
+
+              <!-- 어르신 2 -->
+              <button class="sel-card" onclick="gSelectSenior('senior2')">
+                <div class="sel-av-wrap">
+                  <div class="sel-av pink">이</div>
+                  <div class="sel-online"></div>
+                </div>
+                <div class="sel-name">이○○ 어르신</div>
+                <div class="sel-label">이모</div>
+                <div class="sel-status">✅ 정상</div>
+              </button>
+
+              <!-- 어르신 추가 -->
+              <button class="sel-add" onclick="">
+                <div class="sel-add-ic">＋</div>
+                <div class="sel-add-label">어르신 추가</div>
+              </button>
+            </div>
+
+            <div class="sel-footer">
+              <div class="f-av">김</div>
+              <div class="f-info">
+                <div class="f-name">김다혜 보호자</div>
+                <div class="f-sub">kimdahye@oasis.kr</div>
+              </div>
+              <div class="f-logout">로그아웃</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 보호자 홈 — 멀티 어르신 오버뷰 -->
+        <div class="page" id="page-dashboard">
+          <div class="topbar">
+            <h1>OASIS</h1>
+            <button class="icon-btn">🔔<span class="dot"></span></button>
+          </div>
+
+          <div class="ov-greeting">
+            <div class="date">2026년 5월 20일 수요일</div>
+            <div class="name">보호자 <span>김다혜</span>님</div>
+          </div>
+
+          <!-- 전체 현황 요약 칩 -->
+          <div class="ov-summary">
+            <div class="ov-chip success">
+              <div class="oc-label">관리 어르신</div>
+              <div class="oc-val">2명</div>
+            </div>
+            <div class="ov-chip danger">
+              <div class="oc-label">미해결 알림</div>
+              <div class="oc-val">2건</div>
+            </div>
+            <div class="ov-chip warning">
+              <div class="oc-label">복약 미완료</div>
+              <div class="oc-val">2명</div>
+            </div>
+          </div>
+
+          <div class="ov-sec-title">어르신 현황</div>
+
+          <!-- 어르신 1 — 위험 -->
+          <button class="ov-card" onclick="gOpenSenior('senior1')">
+            <div class="ov-card-strip danger"></div>
+            <div class="ov-card-body">
+              <div class="ov-card-top">
+                <div class="ov-card-left">
+                  <div class="ov-av">김</div>
+                  <div>
+                    <div class="ov-name">김○○ 어르신</div>
+                    <div class="ov-label">어머니 · 마지막 활동 3분 전</div>
+                  </div>
+                </div>
+                <div class="ov-status-badge danger">⚠️ 위험</div>
+              </div>
+              <div class="ov-card-stats">
+                <div class="ov-stat">
+                  <div class="os-label">복약</div>
+                  <div class="os-val warning">2/3</div>
+                </div>
+                <div class="ov-stat-div"></div>
+                <div class="ov-stat">
+                  <div class="os-label">미해결 알림</div>
+                  <div class="os-val danger">2건</div>
+                </div>
+                <div class="ov-stat-div"></div>
+                <div class="ov-stat">
+                  <div class="os-label">센서</div>
+                  <div class="os-val danger">이상</div>
+                </div>
+              </div>
+            </div>
+          </button>
+
+          <!-- 어르신 2 — 정상 -->
+          <button class="ov-card" onclick="gOpenSenior('senior2')">
+            <div class="ov-card-strip"></div>
+            <div class="ov-card-body">
+              <div class="ov-card-top">
+                <div class="ov-card-left">
+                  <div class="ov-av female">이</div>
+                  <div>
+                    <div class="ov-name">이○○ 어르신</div>
+                    <div class="ov-label">이모 · 마지막 활동 12분 전</div>
+                  </div>
+                </div>
+                <div class="ov-status-badge">✅ 정상</div>
+              </div>
+              <div class="ov-card-stats">
+                <div class="ov-stat">
+                  <div class="os-label">복약</div>
+                  <div class="os-val warning">1/2</div>
+                </div>
+                <div class="ov-stat-div"></div>
+                <div class="ov-stat">
+                  <div class="os-label">미해결 알림</div>
+                  <div class="os-val success">0건</div>
+                </div>
+                <div class="ov-stat-div"></div>
+                <div class="ov-stat">
+                  <div class="os-label">센서</div>
+                  <div class="os-val success">정상</div>
+                </div>
+              </div>
+            </div>
+          </button>
+
+          <div class="gap-24"></div>
+        </div>
+
+        <!-- 어르신 상세 뷰 (선택된 어르신의 개별 현황) -->
+        <div class="page" id="page-senior-detail">
+          <div class="detail-topbar">
+            <button class="back-btn" onclick="gSwitchPage('select')">←</button>
+            <div class="dt-name" id="detail-name">김○○ 어르신</div>
+            <div class="dt-badge" id="detail-badge">⚠️ 알림 2건</div>
+          </div>
+
+          <div class="section">
+            <div class="status-banner warning">
+              <span class="icon">⚠️</span>
+              <span>가스 누출 감지 — 환기 필요</span>
+              <span class="meta">3분 전</span>
+            </div>
+          </div>
+
+          <div class="section">
+            <h2 class="section-title">빠른 실행</h2>
+            <div class="action-grid">
+              <button class="action" onclick="gSwitchPage('camera')">
+                <div class="ic">📹</div><div class="lab">홈캠</div>
+              </button>
+              <button class="action" onclick="gSwitchPage('med')">
+                <div class="ic suc">💊</div><div class="lab">복약</div>
+              </button>
+              <button class="action" onclick="gSwitchPage('log')">
+                <div class="ic warn">💬</div><div class="lab">대화기록</div>
+              </button>
+              <button class="action">
+                <div class="ic dan">📞</div><div class="lab">긴급통화</div>
+              </button>
+            </div>
+          </div>
+
+          <div class="section">
+            <div class="section-head">
+              <h2>복약 현황</h2>
+              <span class="more" onclick="gSwitchPage('med')">관리 ›</span>
+            </div>
+            <div class="med-card">
+              <div class="med-row">
+                <span class="title">오늘 복용</span>
+                <span class="count">2 / 3 완료</span>
+              </div>
+              <div class="med-progress"><div class="bar" style="width:67%"></div></div>
+              <div class="next-med">
+                <div class="pill">💊</div>
+                <div class="info">
+                  <div class="n">고혈압약 (저녁)</div>
+                  <div class="t">오후 7시 · 1정</div>
+                </div>
+                <button class="btn-take">복용 확인</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="section">
+            <div class="section-head">
+              <h2>센서 모니터링</h2>
+              <span class="more" onclick="gSwitchPage('camera')">홈캠 ›</span>
+            </div>
+            <div class="sensor-card">
+              <div class="sensor-grid">
+                <div class="sensor-item alert">
+                  <div class="ic">🚶</div>
+                  <div class="text"><div class="name">비활동</div><div class="st">감지됨</div></div>
+                </div>
+                <div class="sensor-item alert">
+                  <div class="ic">🔥</div>
+                  <div class="text"><div class="name">가스</div><div class="st">누출</div></div>
+                </div>
+                <div class="sensor-item">
+                  <div class="ic">🩺</div>
+                  <div class="text"><div class="name">낙상</div><div class="st">정상</div></div>
+                </div>
+                <div class="sensor-item">
+                  <div class="ic">🛡️</div>
+                  <div class="text"><div class="name">재난</div><div class="st">정상</div></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="gap-24"></div>
+        </div>
+
+        <!-- 보호자 복약 관리 -->
+        <div class="page" id="page-med">
+          <div class="topbar">
+            <h1>복약 관리</h1>
+            <button class="icon-btn">＋</button>
+          </div>
+          <div class="section">
+            <div class="med-hero">
+              <div class="label">이번 주 복약 달성률</div>
+              <div class="pct">86%</div>
+              <div class="sub">지난 주 대비 ▲ 12% 향상</div>
+              <div class="ring"><div class="fill"></div></div>
+            </div>
+          </div>
+          <div class="section">
+            <h2 class="section-title">오늘 복용</h2>
+            <div class="pill-card done">
+              <div class="time-block"><div class="hh">8:00</div><div class="ap">AM</div></div>
+              <div class="info"><div class="nm">혈압약</div><div class="dose">아모디핀 · 1정</div></div>
+              <div class="check">✓</div>
+            </div>
+            <div class="pill-card done">
+              <div class="time-block"><div class="hh">12:30</div><div class="ap">PM</div></div>
+              <div class="info"><div class="nm">당뇨약</div><div class="dose">메트포르민 · 1정</div></div>
+              <div class="check">✓</div>
+            </div>
+            <div class="pill-card">
+              <div class="time-block"><div class="hh">7:00</div><div class="ap">PM</div></div>
+              <div class="info"><div class="nm">혈압약 (저녁)</div><div class="dose">아모디핀 · 1정</div></div>
+              <div class="check"></div>
+            </div>
+          </div>
+          <div class="gap-24"></div>
+        </div>
+
+        <!-- 보호자 일정 -->
+        <div class="page" id="page-schedule">
+          <div class="topbar">
+            <h1>일정</h1>
+            <button class="icon-btn">＋</button>
+          </div>
+          <div class="section">
+            <h2 class="section-title">5월 셋째 주</h2>
+            <div class="cal-row">
+              <div class="cal-day"><div class="dow">월</div>18</div>
+              <div class="cal-day has-event"><div class="dow">화</div>19</div>
+              <div class="cal-day active has-event"><div class="dow">수</div>20</div>
+              <div class="cal-day"><div class="dow">목</div>21</div>
+              <div class="cal-day has-event"><div class="dow">금</div>22</div>
+              <div class="cal-day"><div class="dow">토</div>23</div>
+              <div class="cal-day"><div class="dow">일</div>24</div>
+            </div>
+          </div>
+          <div class="section">
+            <h2 class="section-title">오늘 일정 3건</h2>
+            <div class="event">
+              <div class="t">09:00</div>
+              <div class="b"><div class="ttl">병원 진료</div><div class="desc">동아대학교병원 · 내과 김선생님</div></div>
+            </div>
+            <div class="event warn">
+              <div class="t">14:00</div>
+              <div class="b"><div class="ttl">물리치료</div><div class="desc">사하구 보건소</div></div>
+            </div>
+            <div class="event suc">
+              <div class="t">18:30</div>
+              <div class="b"><div class="ttl">가족 식사</div><div class="desc">아들 가족 방문</div></div>
+            </div>
+          </div>
+          <div class="gap-24"></div>
+        </div>
+
+        <!-- 보호자 기록 -->
+        <div class="page" id="page-log">
+          <div class="topbar">
+            <h1>기록</h1>
+            <button class="icon-btn">🔍</button>
+          </div>
+          <div class="tabbar">
+            <button class="tab active" onclick="switchTab(this,'chat')">대화 기록</button>
+            <button class="tab" onclick="switchTab(this,'alerts')">감지 알림 <span class="badge">2</span></button>
+          </div>
+          <div id="tab-chat">
+            <div class="day-header">오늘 · 5월 20일</div>
+            <div class="chat-card">
+              <div class="top">
+                <div class="who"><span class="av">🤖</span> 오아시스 챗봇</div>
+                <div class="when">오전 10:24</div>
+              </div>
+              <div class="msg">오늘 아침 약 복용하셨어요? 따뜻한 물과 함께 드시는 게 좋아요.</div>
+            </div>
+            <div class="chat-card">
+              <div class="top">
+                <div class="who"><span class="av">🤖</span> 오아시스 챗봇</div>
+                <div class="when">오전 11:05</div>
+              </div>
+              <div class="msg">잠깐 산책 다녀오시는 건 어떨까요? 날씨가 정말 좋아요 ☀️</div>
+            </div>
+            <div class="day-header">어제 · 5월 19일</div>
+            <div class="chat-card">
+              <div class="top">
+                <div class="who"><span class="av">🤖</span> 오아시스 챗봇</div>
+                <div class="when">오후 7:00</div>
+              </div>
+              <div class="msg">저녁 약 시간이에요. 식후 30분 후에 드시면 됩니다.</div>
+            </div>
+            <div class="gap-24"></div>
+          </div>
+          <div id="tab-alerts" style="display:none;">
+            <div class="chips">
+              <button class="chip active">전체 4</button>
+              <button class="chip">미해결 2</button>
+              <button class="chip">비활동</button>
+              <button class="chip">가스</button>
+            </div>
+            <div class="section" style="padding-top:0;">
+              <div class="alert-list">
+                <div class="alert danger">
+                  <div class="ic">🔥</div>
+                  <div class="body">
+                    <div class="top"><span class="tag">가스 · 심각</span><span class="time">3분 전</span></div>
+                    <div class="msg">가스 누출 감지 · MQ-5 수치 임계값 초과 (820ppm)</div>
+                    <button class="resolve">해결 처리</button>
+                  </div>
+                </div>
+                <div class="alert warning">
+                  <div class="ic">🚶</div>
+                  <div class="body">
+                    <div class="top"><span class="tag">비활동 · 경고</span><span class="time">12분 전</span></div>
+                    <div class="msg">30분 이상 움직임이 감지되지 않습니다</div>
+                    <button class="resolve">해결 처리</button>
+                  </div>
+                </div>
+                <div class="alert info resolved">
+                  <div class="ic">🚶</div>
+                  <div class="body">
+                    <div class="top"><span class="tag">해결됨</span><span class="time">1시간 전</span></div>
+                    <div class="msg">10분 이상 움직임 없음 (자동 해제)</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="gap-24"></div>
+          </div>
+        </div>
+
+        <!-- 보호자 홈캠 -->
+        <div class="page" id="page-camera">
+          <div class="topbar">
+            <h1>홈캠</h1>
+            <button class="icon-btn">🔄</button>
+          </div>
+          <div class="section">
+            <div class="status-banner danger">
+              <span class="icon">🚨</span>
+              <span>긴급 상황 감지 — 즉시 확인</span>
+              <span class="meta">실시간</span>
+            </div>
+          </div>
+          <div class="section">
+            <div class="cam-frame">
+              <div class="placeholder">
+                <div class="big">📹</div>
+                <div>OASIS CAM · Raspberry Pi</div>
+                <div style="opacity:0.6;margin-top:4px;">실시간 스트리밍</div>
+              </div>
+              <div class="live-pill"><span class="live-dot"></span>LIVE</div>
+              <div class="live-info"><span>거실</span><span>HD · 30fps</span></div>
+            </div>
+            <div class="stat-row">
+              <div class="stat-mini"><div class="l">오늘 발생</div><div class="v">4건</div></div>
+              <div class="stat-mini success"><div class="l">해결</div><div class="v">2건</div></div>
+              <div class="stat-mini danger"><div class="l">미해결</div><div class="v">2건</div></div>
+            </div>
+          </div>
+          <div class="section">
+            <h2 class="section-title">실시간 센서</h2>
+            <div class="sensor-card">
+              <div class="sensor-grid">
+                <div class="sensor-item alert"><div class="ic">🚶</div><div class="text"><div class="name">비활동</div><div class="st">감지됨</div></div></div>
+                <div class="sensor-item alert"><div class="ic">🔥</div><div class="text"><div class="name">가스 820ppm</div><div class="st">위험</div></div></div>
+                <div class="sensor-item"><div class="ic">🩺</div><div class="text"><div class="name">낙상</div><div class="st">정상</div></div></div>
+                <div class="sensor-item"><div class="ic">🛡️</div><div class="text"><div class="name">재난</div><div class="st">정상</div></div></div>
+              </div>
+            </div>
+          </div>
+          <div class="gap-24"></div>
+        </div>
+
+        <!-- 보호자 설정 -->
+        <div class="page" id="page-settings">
+          <div class="topbar"><h1>설정</h1></div>
+          <div class="profile">
+            <div class="av">김</div>
+            <div class="info">
+              <div class="name">김다혜</div>
+              <div class="sub">kimdahye@oasis.kr · 보호자 모드</div>
+            </div>
+          </div>
+          <div class="menu-list">
+            <button class="menu-item"><div class="ic">🔔</div><div class="lab">알림 수신</div><div class="toggle on"></div></button>
+            <button class="menu-item"><div class="ic">🌙</div><div class="lab">다크 모드</div><div class="toggle"></div></button>
+            <button class="menu-item"><div class="ic">🔊</div><div class="lab">큰 소리 알림</div><div class="toggle on"></div></button>
+          </div>
+          <div class="menu-list">
+            <button class="menu-item"><div class="ic">📹</div><div class="lab">홈캠 연결 설정</div><div class="arr">›</div></button>
+            <button class="menu-item"><div class="ic">⚙️</div><div class="lab">감지 민감도</div><div class="arr">›</div></button>
+            <button class="menu-item"><div class="ic">👨‍👩‍👧</div><div class="lab">보호자 연결</div><div class="arr">›</div></button>
+            <button class="menu-item"><div class="ic">📞</div><div class="lab">긴급 연락처</div><div class="arr">›</div></button>
+          </div>
+          <div class="menu-list">
+            <button class="menu-item"><div class="ic">🚪</div><div class="lab" style="color:var(--danger)">로그아웃</div><div class="arr">›</div></button>
+          </div>
+          <div class="gap-24"></div>
+        </div>
+
+      </div><!-- /g-pages -->
+
+      <!-- 보호자 하단 내비 (5개) -->
+      <nav class="guard-nav" id="guard-nav">
+        <button class="nav-item active" onclick="gSwitchPage('select')">
+          <span class="ic">🏠</span><span>홈</span>
+        </button>
+        <button class="nav-item" onclick="gSwitchPage('med')">
+          <span class="ic">💊</span><span>복약</span>
+        </button>
+        <button class="nav-item" onclick="gSwitchPage('schedule')">
+          <span class="ic">📅</span><span>일정</span>
+        </button>
+        <button class="nav-item" onclick="gSwitchPage('log')">
+          <span class="ic">💬</span><span>기록</span>
+          <span class="nb">2</span>
+        </button>
+        <button class="nav-item" onclick="gSwitchPage('camera')">
+          <span class="ic">📹</span><span>홈캠</span>
+        </button>
+      </nav>
+    </div>
+  </div>
+
+</div><!-- /phones-wrapper -->
+
+<script>
+/* ─── 보호자 내비게이션 ─── */
+const gNavMap = { dashboard:0, med:1, schedule:2, log:3, camera:4 };
+
+// 어르신별 목업 데이터
+const seniorData = {
+  senior1: { name:'김○○ 어르신', badge:'⚠️ 알림 2건', badgeClass:'warning' },
+  senior2: { name:'이○○ 어르신', badge:'✅ 정상',     badgeClass:''        },
+};
+
+function gSwitchPage(name){
+  document.querySelectorAll('#g-pages .page').forEach(p => p.classList.remove('active'));
+  document.getElementById('page-' + name).classList.add('active');
+  document.querySelectorAll('#guard-nav .nav-item').forEach((n,i) => {
+    n.classList.toggle('active', i === gNavMap[name]);
+  });
+}
+
+/* 선택 화면에서 어르신 카드 탭 → 상세 뷰 바로 진입 */
+function gSelectSenior(seniorKey){
+  const d = seniorData[seniorKey];
+  document.getElementById('detail-name').textContent = d.name;
+  const badge = document.getElementById('detail-badge');
+  badge.textContent = d.badge;
+  badge.className = 'dt-badge' + (d.badgeClass ? ' ' + d.badgeClass : '');
+  gSwitchPage('senior-detail');
+}
+
+/* 오버뷰 화면에서 어르신 카드 탭 → 상세 뷰 진입 */
+function gOpenSenior(seniorKey){
+  const d = seniorData[seniorKey];
+  document.getElementById('detail-name').textContent = d.name;
+  const badge = document.getElementById('detail-badge');
+  badge.textContent = d.badge;
+  badge.className = 'dt-badge' + (d.badgeClass ? ' ' + d.badgeClass : '');
+  gSwitchPage('senior-detail');
+  // 상세 뷰는 홈 탭에 귀속 → 홈 탭 활성 유지
+  document.querySelectorAll('#guard-nav .nav-item').forEach((n,i) => {
+    n.classList.toggle('active', i === 0);
+  });
+}
+function switchTab(btn, name){
+  btn.closest('.tabbar').querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('tab-chat').style.display = (name==='chat') ? 'block' : 'none';
+  document.getElementById('tab-alerts').style.display = (name==='alerts') ? 'block' : 'none';
+}
+
+/* ─── 시니어 내비게이션 ─── */
+const sNavMap = { home:0, med:1, sos:2 };
+let isSimpleMode = false;
+
+function sSwitchPage(name){
+  document.querySelectorAll('#s-pages .page').forEach(p => p.classList.remove('active'));
+  const target = document.getElementById('s-page-' + name);
+  if(target) target.classList.add('active');
+  document.querySelectorAll('#senior-nav .nav-item').forEach((n,i) => {
+    n.classList.toggle('active', i === sNavMap[name]);
+  });
+}
+
+function setSeniorMode(mode){
+  isSimpleMode = (mode === 'simple');
+  document.getElementById('mode-normal-btn').classList.toggle('active', !isSimpleMode);
+  document.getElementById('mode-simple-btn').classList.toggle('active', isSimpleMode);
+  document.getElementById('senior-phone').classList.toggle('simple-mode', isSimpleMode);
+  document.getElementById('s-simple-toggle').classList.toggle('on', isSimpleMode);
+  const banner = document.getElementById('s-mode-banner');
+  if(isSimpleMode){
+    banner.textContent = '✨ 심플 모드 — 꼭 필요한 기능만 표시됩니다';
+    banner.style.cssText = 'margin:12px 20px;border-radius:var(--r-lg);padding:14px 16px;display:flex;align-items:center;gap:10px;font-weight:700;background:#FFF3E5;color:#FF8A00;font-size:var(--sf-xs);';
+    /* 심플 모드에서는 홈으로 이동 */
+    sSwitchPage('home');
+  } else {
+    banner.textContent = 'ℹ️ 일반 모드 — 모든 기능이 표시됩니다';
+    banner.style.cssText = 'margin:12px 20px;border-radius:var(--r-lg);padding:14px 16px;display:flex;align-items:center;gap:10px;font-weight:700;background:var(--brand-soft);color:var(--brand);font-size:var(--sf-xs);';
+  }
+}
+
+function toggleSeniorMode(){
+  setSeniorMode(isSimpleMode ? 'normal' : 'simple');
+}
+</script>
+
+</body>
+</html>
