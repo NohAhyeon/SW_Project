@@ -42,13 +42,3 @@ async def delete_schedule(schedule_id: int, db: AsyncSession = Depends(get_db)):
         await db.delete(schedule)
         await db.commit()
     return {"message": "삭제 완료"}
-
-# 일정 완료 취소
-@router.patch("/{schedule_id}/uncomplete")
-async def uncomplete_schedule(schedule_id: int, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(Schedule).where(Schedule.id == schedule_id))
-    schedule = result.scalar_one_or_none()
-    if schedule:
-        schedule.is_completed = False
-        await db.commit()
-    return {"message": "완료 취소됨"}
