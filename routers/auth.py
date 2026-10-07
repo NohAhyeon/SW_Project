@@ -1,5 +1,8 @@
+import os
+from dotenv import load_dotenv
 from fastapi import APIRouter, HTTPException, Depends
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from passlib.context import CryptContext
@@ -10,14 +13,22 @@ from models import User
 from schemas import UserCreate, UserUpdate, UserResponse, Token
 import httpx
 
+load_dotenv()
+
 router = APIRouter()
 
-SECRET_KEY = "노인케어챗봇시크릿키2026"
+# .env에 SECRET_KEY가 있으면 그걸 쓰고, 없으면 기존 값 사용
+SECRET_KEY = os.getenv("SECRET_KEY", "노인케어챗봇시크릿키2026")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24  # 24시간
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/token")
+
+
+# 앱에서 소셜 로그인할 때 body로 보내는 형식
+class SocialLoginRequest(BaseModel):
+    access_token: str
 
 
 def create_access_token(data: dict):
@@ -28,7 +39,8 @@ def create_access_token(data: dict):
 
 
 def verify_password(plain, hashed):
-    return pwd_context.verify(plain, hashed)
+    # bcrypt는 72자까지만 받아서 잘라줌
+    return pwd_context.verify(plain[:72], hashed)
 
 
 def hash_password(password: str):
@@ -160,6 +172,108 @@ async def google_login(access_token: str, db: AsyncSession = Depends(get_db)):
         db.add(user)
         await db.commit()
         await db.refresh(user)
+
+    token = create_access_token({"sub": user.username, "role": user.role})
+    return {"access_token": token, "token_type": "bearer"}
+
+
+# ===== 카카오 로그인 (가입된 계정만) =====
+@router.post("/kakao/login", response_model=Token)
+async def kakao_login_only(request: SocialLoginRequest, db: AsyncSession = Depends(get_db)):
+    async with httpx.AsyncClient() as client:
+        response = await client.get(
+            "https://kapi.kakao.com/v2/user/me",
+            headers={"Authorization": f"Bearer {request.access_token}"}
+        )
+    if response.status_code != 200:
+        raise HTTPException(status_code=401, detail="카카오 인증 실패")
+
+    kakao_user = response.json()
+    social_id = str(kakao_user["id"])
+
+    result = await db.execute(select(User).where(User.social_provider == "kakao", User.social_id == social_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="계정을 찾을 수 없습니다")
+
+    token = create_access_token({"sub": user.username, "role": user.role})
+    return {"access_token": token, "token_type": "bearer"}
+
+
+# ===== 카카오 회원가입 =====
+@router.post("/kakao/signup", response_model=Token)
+async def kakao_signup(request: SocialLoginRequest, db: AsyncSession = Depends(get_db)):
+    async with httpx.AsyncClient() as client:
+        response = await client.get(
+            "https://kapi.kakao.com/v2/user/me",
+            headers={"Authorization": f"Bearer {request.access_token}"}
+        )
+    if response.status_code != 200:
+        raise HTTPException(status_code=401, detail="카카오 인증 실패")
+
+    kakao_user = response.json()
+    social_id = str(kakao_user["id"])
+    nickname = kakao_user.get("properties", {}).get("nickname", "사용자")
+
+    result = await db.execute(select(User).where(User.social_provider == "kakao", User.social_id == social_id))
+    if result.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="이미 가입된 계정입니다")
+
+    user = User(username=f"kakao_{social_id}", social_provider="kakao", social_id=social_id, nickname=nickname, role="user")
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
+
+    token = create_access_token({"sub": user.username, "role": user.role})
+    return {"access_token": token, "token_type": "bearer"}
+
+
+# ===== 구글 로그인 (가입된 계정만) =====
+@router.post("/google/login", response_model=Token)
+async def google_login_only(request: SocialLoginRequest, db: AsyncSession = Depends(get_db)):
+    async with httpx.AsyncClient() as client:
+        response = await client.get(
+            "https://www.googleapis.com/oauth2/v3/userinfo",
+            headers={"Authorization": f"Bearer {request.access_token}"}
+        )
+    if response.status_code != 200:
+        raise HTTPException(status_code=401, detail="구글 인증 실패")
+
+    google_user = response.json()
+    social_id = google_user["sub"]
+
+    result = await db.execute(select(User).where(User.social_provider == "google", User.social_id == social_id))
+    user = result.scalar_one_or_none()
+    if not user:
+        raise HTTPException(status_code=404, detail="계정을 찾을 수 없습니다")
+
+    token = create_access_token({"sub": user.username, "role": user.role})
+    return {"access_token": token, "token_type": "bearer"}
+
+
+# ===== 구글 회원가입 =====
+@router.post("/google/signup", response_model=Token)
+async def google_signup(request: SocialLoginRequest, db: AsyncSession = Depends(get_db)):
+    async with httpx.AsyncClient() as client:
+        response = await client.get(
+            "https://www.googleapis.com/oauth2/v3/userinfo",
+            headers={"Authorization": f"Bearer {request.access_token}"}
+        )
+    if response.status_code != 200:
+        raise HTTPException(status_code=401, detail="구글 인증 실패")
+
+    google_user = response.json()
+    social_id = google_user["sub"]
+    nickname = google_user.get("name", "사용자")
+
+    result = await db.execute(select(User).where(User.social_provider == "google", User.social_id == social_id))
+    if result.scalar_one_or_none():
+        raise HTTPException(status_code=409, detail="이미 가입된 계정입니다")
+
+    user = User(username=f"google_{social_id}", social_provider="google", social_id=social_id, nickname=nickname, role="user")
+    db.add(user)
+    await db.commit()
+    await db.refresh(user)
 
     token = create_access_token({"sub": user.username, "role": user.role})
     return {"access_token": token, "token_type": "bearer"}

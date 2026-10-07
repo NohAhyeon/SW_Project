@@ -14,7 +14,14 @@ async def check_medicine_alarms():
         medicines = result.scalars().all()
         for medicine in medicines:
             alarm_times = medicine.alarm_times.split(",")
-            if now in alarm_times:
+            # "2026-10-08 08:30" 처럼 날짜가 같이 들어와도 시간만 비교
+            alarm_times_only = []
+            for t in alarm_times:
+                t = t.strip()
+                if " " in t:
+                    t = t.split(" ")[-1]
+                alarm_times_only.append(t)
+            if now in alarm_times_only:
                 alert = Alert(
                     type="복약알림",
                     message=f"{medicine.name} 드실 시간이에요! ({medicine.dose})",

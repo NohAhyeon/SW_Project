@@ -94,15 +94,23 @@ async def get_conversations(
     )
     items = result.scalars().all()
 
-    for item in items:
-        item.content = decrypt(item.content)
-
+    # items를 그대로 넣으면 500 에러가 나서 dict로 바꿔서 반환
     return {
         "total": total,
         "page": page,
         "size": size,
         "total_pages": (total + size - 1) // size,
-        "items": items
+        "items": [
+            {
+                "id": item.id,
+                "session_id": item.session_id,
+                "role": item.role,
+                "content": decrypt(item.content),
+                "type": item.type,
+                "created_at": item.created_at.isoformat() if item.created_at else None
+            }
+            for item in items
+        ]
     }
 
 

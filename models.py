@@ -98,3 +98,12 @@ class Alert(Base):
     created_at = Column(DateTime, default=func.now())
 
     senior = relationship("User", foreign_keys=[senior_id])
+
+
+# 설정 테이블
+class Setting(Base):
+    __tablename__ = "settings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    key = Column(String, unique=True, index=True)
+    value = Column(String)
