@@ -126,4 +126,4 @@ graph TD
 ## 🔗 6. 저장소 정보
 
 * **GitHub Repository**: [https://github.com/NohAhyeon/SW_Project](https://github.com/NohAhyeon/SW_Project)
-* **팀명**: 팀 OASIS
+* **팀명**: OASIS
