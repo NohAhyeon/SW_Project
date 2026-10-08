@@ -52,30 +52,30 @@ class _SchedulePageState extends State<SchedulePage> {
         children: [
           Container(
             width: double.infinity,
-            padding: const EdgeInsets.fromLTRB(20, 24, 20, 28),
+            padding: const EdgeInsets.fromLTRB(20, 24, 20, 24),
             decoration: const BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.only(
-                bottomLeft: Radius.circular(28),
-                bottomRight: Radius.circular(28),
+              gradient: LinearGradient(
+                colors: [Color(0xFF0EA5E9), Color(0xFF6366F1)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
               ),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text('${now.year}년 ${now.month}월 ${now.day}일',
-                    style: const TextStyle(color: Color(0xFF94A3B8), fontSize: 15, fontWeight: FontWeight.w500)),
-                const SizedBox(height: 8),
+                    style: const TextStyle(color: Colors.white70, fontSize: 13)),
+                const SizedBox(height: 6),
                 Text('오늘 일정 ${today.length}개',
-                    style: const TextStyle(color: Color(0xFF0EA5E9), fontSize: 30, fontWeight: FontWeight.w800)),
-                const SizedBox(height: 14),
+                    style: const TextStyle(color: Colors.white, fontSize: 28, fontWeight: FontWeight.w800)),
+                const SizedBox(height: 12),
                 Row(
                   children: [
-                    _StatBadge(label: '예정', count: today.where((s) => s["status"] == "" || s["status"] == "예정").length, color: const Color(0xFFEFF6FF)),
+                    _StatBadge(label: '예정', count: today.where((s) => s["status"] == "" || s["status"] == "예정").length, color: Colors.white.withOpacity(0.2)),
                     const SizedBox(width: 8),
-                    _StatBadge(label: '완료', count: done, color: const Color(0xFFF0FDF4)),
+                    _StatBadge(label: '완료', count: done, color: Colors.white.withOpacity(0.2)),
                     const SizedBox(width: 8),
-                    _StatBadge(label: '취소', count: today.where((s) => s["status"] == "취소").length, color: const Color(0xFFF1F5F9)),
+                    _StatBadge(label: '취소', count: today.where((s) => s["status"] == "취소").length, color: Colors.white.withOpacity(0.2)),
                   ],
                 ),
               ],
@@ -551,7 +551,7 @@ class _StatBadge extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(color: color, borderRadius: BorderRadius.circular(20)),
-      child: Text('$label $count', style: const TextStyle(color: Color(0xFF64748B), fontSize: 12, fontWeight: FontWeight.w600)),
+      child: Text('$label $count', style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600)),
     );
   }
 }

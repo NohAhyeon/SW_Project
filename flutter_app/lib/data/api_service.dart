@@ -3,9 +3,12 @@ import 'package:http/http.dart' as http;
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 final String apiKey = dotenv.env['WEATHER_API_KEY'] ?? "";
-final String url = "https://api.openweathermap.org/data/2.5/weather?q=Seoul&appid=$apiKey&units=metric";
+final String url = "https://api.openweathermap.org/data/2.5/weather?q=Busan,KR&appid=$apiKey&units=metric&lang=kr";
 
-const String baseUrl = 'http://localhost:8000';
+final String baseUrl = dotenv.env['API_BASE_URL'] ?? 'http://localhost:8000';
+
+// ── MOCK DATA (서버 미연결 시 목업) ──────────────────────────
+const bool _useMock = false;
 
 class ApiService {
 
@@ -24,6 +27,11 @@ class ApiService {
   
   // ===== 복약 =====
   static Future<List<Map>> getMedications() async {
+    if (_useMock) return [
+      {"name": "혈압약", "time": "08:00", "taken": true, "id": 1},
+      {"name": "당뇨약", "time": "12:00", "taken": true, "id": 2},
+      {"name": "관절약", "time": "20:00", "taken": false, "id": 3},
+    ];
     try {
       final res = await http.get(Uri.parse('$baseUrl/medicine/'));
       if (res.statusCode == 200) {
@@ -87,6 +95,20 @@ class ApiService {
     }
   }
 
+  static Future<bool> updateMedication(int id, String name, String time) async {
+    try {
+      final res = await http.put(
+        Uri.parse('$baseUrl/medicine/$id'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'name': name, 'schedule_time': time}),
+      );
+      return res.statusCode == 200;
+    } catch (e) {
+      print('복약 수정 오류: $e');
+      return false;
+    }
+  }
+
   static Future<bool> deleteMedication(int id) async {
     try {
       final res = await http.delete(Uri.parse('$baseUrl/medicine/$id'));
@@ -99,6 +121,15 @@ class ApiService {
 
   // ===== 일정 =====
   static Future<List<Map>> getSchedules() async {
+    if (_useMock) {
+      final today = DateTime.now();
+      final d = '${today.year}-${today.month.toString().padLeft(2,'0')}-${today.day.toString().padLeft(2,'0')}';
+      return [
+        {"title": "병원 진료", "time": "${d}T10:00:00", "status": "완료", "id": 1},
+        {"title": "물리치료", "time": "${d}T14:00:00", "status": "", "id": 2},
+        {"title": "복지관 방문", "time": "${d}T16:00:00", "status": "", "id": 3},
+      ];
+    }
     try {
       final res = await http.get(Uri.parse('$baseUrl/schedule/'));
       if (res.statusCode == 200) {
@@ -173,38 +204,38 @@ class ApiService {
 
   // ===== 대화 로그 =====
   static Future<List<Map>> getChatLogs() async {
+    if (_useMock) return [
+      {"role": "user", "content": "오늘 날씨 어때?", "time": "2026-06-22T09:00:00"},
+      {"role": "assistant", "content": "오늘 서울은 맑고 기온은 26도예요. 외출하기 좋은 날씨네요! 😊", "time": "2026-06-22T09:00:05"},
+      {"role": "user", "content": "혈압약 먹었어", "time": "2026-06-22T09:30:00"},
+      {"role": "assistant", "content": "잘 하셨어요! 혈압약 복용 완료로 기록했습니다. 💊", "time": "2026-06-22T09:30:03"},
+      {"role": "user", "content": "오후에 병원 예약 있어?", "time": "2026-06-22T10:00:00"},
+      {"role": "assistant", "content": "오늘 오후 2시에 물리치료 일정이 있으세요. 잊지 마세요! 📅", "time": "2026-06-22T10:00:04"},
+    ];
     try {
       final res = await http.get(Uri.parse('$baseUrl/chat/?page=1&size=500'));
       if (res.statusCode == 200) {
         final decoded = jsonDecode(res.body);
         final List data = decoded is List ? decoded : (decoded['items'] ?? []);
 
-        // 오래된 순으로 정렬해서 user→bot 쌍 맞추기
-        final List reversed = data.reversed.toList();
+        // id 기준 정렬 (DB 저장 순서가 정확)
+        final List sorted = [...data];
+        sorted.sort((a, b) {
+          final ia = (a["id"] as num?)?.toInt() ?? 0;
+          final ib = (b["id"] as num?)?.toInt() ?? 0;
+          if (ia != ib) return ia.compareTo(ib);
+          // id 같으면 시간으로 2차 정렬
+          final ta = DateTime.tryParse((a["created_at"] ?? '').toString()) ?? DateTime(0);
+          final tb = DateTime.tryParse((b["created_at"] ?? '').toString()) ?? DateTime(0);
+          return ta.compareTo(tb);
+        });
 
-        final List<Map> result = [];
-        Map? currentPair;
-
-        for (final e in reversed) {
-          final role = e["role"]?.toString() ?? '';
-          final content = e["content"]?.toString() ?? '';
-          final time = e["created_at"]?.toString() ?? '';
-
-          if (role == "user") {
-            currentPair = {
-              "user": content,
-              "bot": "",
-              "time": time,
-              "type": _classifyChat(content),
-            };
-          } else if (role == "assistant" && currentPair != null) {
-            currentPair["bot"] = content;
-            result.add(currentPair);
-            currentPair = null;
-          }
-        }
-        if (currentPair != null) result.add(currentPair!);
-        return result.reversed.toList();
+        return sorted.map((e) => {
+          "role": e["role"]?.toString() ?? '',
+          "content": e["content"]?.toString() ?? '',
+          "time": e["created_at"]?.toString() ?? '',
+          "type": e["type"]?.toString() ?? '',
+        }).toList();
       }
     } catch (e) {
       print('대화 로그 조회 오류: $e');
@@ -214,6 +245,9 @@ class ApiService {
 
   // ===== 알림 =====
   static Future<List<Map>> getAlerts() async {
+    if (_useMock) return [
+      {"time": "2026-06-22T08:00:00", "content": "비활동 감지", "status": "처리 완료", "type": "비활동", "id": 1},
+    ];
     try {
       final res = await http.get(Uri.parse('$baseUrl/alert/'));
       if (res.statusCode == 200) {
@@ -222,7 +256,7 @@ class ApiService {
           "time": e["created_at"] ?? '',
           "content": e["message"] ?? '',
           "status": e["is_resolved"] == true ? "처리 완료" : "처리 중",
-          "type": e["type"] ?? "비활동",
+          "type": _normalizeAlertType(e["type"]),
           "id": e["id"],
         }).toList();
       }
@@ -230,6 +264,14 @@ class ApiService {
       print('알림 조회 오류: $e');
     }
     return [];
+  }
+
+  // 백엔드가 만드는 알림 이름을 앱 화면에서 쓰는 이름으로 통일
+  //   가스감지 → 가스, 위급 → 긴급 (센서·어르신 음성 긴급 알림이 화면에 뜨도록)
+  static String _normalizeAlertType(dynamic type) {
+    const alias = {'가스감지': '가스', '위급': '긴급', '낙상감지': '낙상', '비활동감지': '비활동'};
+    final t = (type ?? '비활동').toString();
+    return alias[t] ?? t;
   }
 
   static Future<bool> resolveAlert(int id) async {
@@ -247,6 +289,7 @@ class ApiService {
 
   // ===== 날씨 =====
   static Future<Map<String, dynamic>?> getWeather() async {
+    if (_useMock) return {'temp': 26, 'desc': '맑음', 'main': 'Clear'};
     try {
       final res = await http.get(Uri.parse(url));
       if (res.statusCode == 200) {
@@ -265,6 +308,7 @@ class ApiService {
 
   // ===== 미해결 알림만 조회 =====
   static Future<List<Map>> getUnresolvedAlerts() async {
+    if (_useMock) return [];
     try {
       final res = await http.get(Uri.parse('$baseUrl/alert/unresolved'));
       if (res.statusCode == 200) {

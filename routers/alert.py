@@ -77,3 +77,35 @@ async def create_emergency(message: str, db: AsyncSession = Depends(get_db)):
     await db.commit()
 
     return {"message": "위급 알림이 발생했습니다. 보호자에게 연락 알림이 전송됐습니다."}
+
+# 가스 감지 알림 발생 (라즈베리파이 mq5에서 호출)
+@router.post("/gas")
+async def create_gas_alert(db: AsyncSession = Depends(get_db)):
+    # 가스 감지 알림 저장
+    gas_alert = Alert(
+        type="가스감지",
+        message="⚠️ 가스 누출이 감지되었습니다! 즉시 환기하세요.",
+        is_resolved=False
+    )
+    db.add(gas_alert)
+
+    # 보호자 연락 알림 자동 생성
+    guardian = Alert(
+        type="보호자연락",
+        message="🚨 가스 누출 감지! 보호자에게 연락이 필요합니다.",
+        is_resolved=False
+    )
+    db.add(guardian)
+    await db.commit()
+
+    return {"message": "가스 감지 알림이 발생했습니다."}
+
+# 가스 감지 기록 조회
+@router.get("/gas", response_model=List[AlertResponse])
+async def get_gas_alerts(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(
+        select(Alert)
+        .where(Alert.type == "가스감지")
+        .order_by(Alert.created_at.desc())
+    )
+    return result.scalars().all()

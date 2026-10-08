@@ -1,28 +1,33 @@
 import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import '../main.dart';
 import '../pages/camera_page.dart';
 import 'login_screen.dart';
 import 'senior_main_page.dart';
 
-const _guardianApiBase = 'http://localhost:8000';
+final _guardianApiBase = dotenv.env['API_BASE_URL'] ?? 'http://localhost:8000';
 
 // DESIGN TOKENS
-const _bg = Color(0xFFF7F8FA);
+// 푸른 계열 단일 시스템 (senior_main_page.dart 와 동일한 토큰)
+// 상태색: 정상 = 블루, 주의 = 앰버, 위험 = 레드 (상태 구분이 필요한 곳에서만 사용)
+const _bg = Color(0xFFF3F6FB);
 const _surface = Colors.white;
-const _line = Color(0xFFEAECEF);
-const _text1 = Color(0xFF191F28);
-const _text2 = Color(0xFF4E5968);
-const _text3 = Color(0xFF8B95A1);
-const _brand = Color(0xFF3182F6);
-const _brandSoft = Color(0xFFE8F2FE);
-const _danger = Color(0xFFF04452);
-const _dangerSoft = Color(0xFFFDECEE);
-const _warning = Color(0xFFFF8A00);
-const _warnSoft = Color(0xFFFFF3E5);
-const _success = Color(0xFF00B96B);
-const _sucSoft = Color(0xFFE5F8EF);
+const _line = Color(0xFFE3E9F2);
+const _text1 = Color(0xFF14213D);
+const _text2 = Color(0xFF4A5A73);
+const _text3 = Color(0xFF6B7A90);
+const _brand = Color(0xFF2563EB);
+const _brandSoft = Color(0xFFEAF1FE);
+const _sky = Color(0xFF0A72B5);
+const _skySoft = Color(0xFFE6F3FB);
+const _danger = Color(0xFFDC2626);
+const _dangerSoft = Color(0xFFFEF0F0);
+const _warning = Color(0xFFB45309);
+const _warnSoft = Color(0xFFFFF5E6);
+const _success = Color(0xFF2563EB);
+const _sucSoft = Color(0xFFEAF1FE);
 
 class SeniorSelectScreen extends StatefulWidget {
   final int guardianId;
@@ -228,7 +233,7 @@ class _SeniorSelectScreenState extends State<SeniorSelectScreen> {
                                         decoration: const BoxDecoration(
                                           shape: BoxShape.circle,
                                           gradient: LinearGradient(
-                                            colors: [Color(0xFF3182F6), Color(0xFF5BA0FF)],
+                                            colors: [Color(0xFF1E56DB), Color(0xFF3B94F2)],
                                             begin: Alignment.topLeft,
                                             end: Alignment.bottomRight,
                                           ),
@@ -331,7 +336,7 @@ class _SelCard extends StatelessWidget {
                               decoration: const BoxDecoration(
                                 shape: BoxShape.circle,
                                 gradient: LinearGradient(
-                                  colors: [Color(0xFF3182F6), Color(0xFF5BA0FF)],
+                                  colors: [Color(0xFF1E56DB), Color(0xFF3B94F2)],
                                   begin: Alignment.topLeft,
                                   end: Alignment.bottomRight,
                                 ),
@@ -462,7 +467,7 @@ void _toast(BuildContext ctx, String msg) {
   ScaffoldMessenger.of(ctx).showSnackBar(
     SnackBar(
       content: Text(msg, style: const TextStyle(fontWeight: FontWeight.w600)),
-      backgroundColor: const Color(0xFF191F28),
+      backgroundColor: _text1,
       behavior: SnackBarBehavior.floating,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
       duration: const Duration(seconds: 2),
@@ -493,7 +498,7 @@ void _showEmergencyDialog(BuildContext ctx, Map<String, dynamic> data) {
         children: [
           _EmergencyContactTile(label: '119 응급구조', sub: '소방청 응급 구조', emoji: '🚑', color: _dangerSoft, textColor: _danger),
           const SizedBox(height: 8),
-          _EmergencyContactTile(label: '112 경찰', sub: '긴급 신고', emoji: '🚓', color: _warnSoft, textColor: _warning),
+          _EmergencyContactTile(label: '112 경찰', sub: '긴급 신고', emoji: '🚓', color: _brandSoft, textColor: _brand),
           const SizedBox(height: 8),
           _EmergencyContactTile(label: '보호자 연락', sub: '가족에게 알림 전송', emoji: '👨‍👩‍👦', color: _brandSoft, textColor: _brand),
         ],
@@ -606,12 +611,12 @@ class _GuardianSeniorDetailPageState extends State<GuardianSeniorDetailPage> {
           backgroundColor: Colors.white,
           elevation: 0,
           leading: IconButton(
-            icon: const Icon(Icons.arrow_back_ios_rounded, color: Color(0xFF191F28)),
+            icon: const Icon(Icons.arrow_back_ios_rounded, color: _text1),
             onPressed: () => Navigator.of(context).pop(),
           ),
           title: Text(
             '${widget.data['nickname'] ?? '어르신'} 홈캠',
-            style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: Color(0xFF191F28)),
+            style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: _text1),
           ),
           centerTitle: true,
         ),
@@ -752,7 +757,7 @@ class _GuardianSeniorDetailPageState extends State<GuardianSeniorDetailPage> {
                             ),
                           ),
                           _QuickAction(
-                            emoji: '💬', label: '대화기록', color: _warnSoft, textColor: _warning,
+                            emoji: '💬', label: '대화기록', color: _skySoft, textColor: _sky,
                             onTap: () => _toast(context, '대화기록 기능 준비 중입니다'),
                           ),
                           _QuickAction(

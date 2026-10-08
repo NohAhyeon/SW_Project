@@ -25,9 +25,15 @@ class AppState {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await Firebase.initializeApp();
-  KakaoSdk.init(nativeAppKey: '9df1ac4ab4e378579ff3920c81a502d3');
+  // Firebase 설정 파일이 없는 로컬 시뮬레이터에서도 UI를 확인할 수 있게
+  // 초기화 실패가 앱 시작을 막지 않도록 한다.
+  try {
+    await Firebase.initializeApp();
+  } catch (error) {
+    debugPrint('Firebase 초기화를 건너뜁니다: $error');
+  }
   await dotenv.load(fileName: ".env");
+  KakaoSdk.init(nativeAppKey: dotenv.env['KAKAO_NATIVE_APP_KEY'] ?? '');
   runApp(const MyApp());
 }
 
@@ -50,11 +56,15 @@ class MyApp extends StatelessWidget {
         GlobalCupertinoLocalizations.delegate,
       ],
       theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF6366F1)),
+        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF2F6FEB)),
         useMaterial3: true,
+        // 버튼은 그림자 없이 평평하게 (토스 스타일)
+        elevatedButtonTheme: ElevatedButtonThemeData(
+          style: ElevatedButton.styleFrom(elevation: 0, shadowColor: Colors.transparent),
+        ),
         fontFamily: 'SF Pro',
       ),
-      home: const _DebugHome(), // TODO: restore to SplashScreen for production
+      home: const _DebugHome(), // TODO: restore to LoginScreen for production
     );
   }
 }
@@ -83,7 +93,7 @@ class _DebugHomeState extends State<_DebugHome> {
     AppState.userId = 5;
     if (!mounted) return;
     Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => SeniorSelectScreen(guardianId: AppState.userId)),
+      MaterialPageRoute(builder: (_) => const SeniorMainPage()),
     );
   }
 

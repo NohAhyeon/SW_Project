@@ -5,6 +5,16 @@ from database import AsyncSessionLocal
 from models import Medicine, Schedule, Alert
 from datetime import datetime
 
+
+def _hhmm(t: str) -> str:
+    """'9:00', ' 09:00', '2026-10-08 9:00' → '09:00' 으로 통일"""
+    t = (t or "").strip().split(" ")[-1]
+    try:
+        h, m = t.split(":")[:2]
+        return f"{int(h):02d}:{int(m):02d}"
+    except ValueError:
+        return t
+
 scheduler = AsyncIOScheduler()
 
 async def check_medicine_alarms():
@@ -13,8 +23,9 @@ async def check_medicine_alarms():
         result = await db.execute(select(Medicine))
         medicines = result.scalars().all()
         for medicine in medicines:
-            alarm_times = medicine.alarm_times.split(",")
-            if now in alarm_times:
+            # "9:00", "2026-10-08 08:30" 처럼 형식이 달라도 시간만 맞춰서 비교
+            alarm_times_only = [_hhmm(t) for t in (medicine.alarm_times or "").split(",")]
+            if now in alarm_times_only:
                 alert = Alert(
                     type="복약알림",
                     message=f"{medicine.name} 드실 시간이에요! ({medicine.dose})",
@@ -31,10 +42,7 @@ async def check_schedule_alarms():
         )
         schedules = result.scalars().all()
         for schedule in schedules:
-            schedule_time = schedule.datetime
-            if len(schedule_time) >= 5:
-                schedule_time = schedule_time[-5:]
-            if now == schedule_time:
+            if now == _hhmm(schedule.datetime):
                 alert = Alert(
                     type="일정알림",
                     message=f"📅 {schedule.title} 시간이에요!",

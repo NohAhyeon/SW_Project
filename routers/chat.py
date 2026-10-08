@@ -8,11 +8,16 @@ from crypto import encrypt, decrypt
 from typing import List
 import httpx
 import os
+from dotenv import load_dotenv
+
+load_dotenv()
 
 router = APIRouter()
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={GEMINI_API_KEY}"
+# gemini-2.0-flash 는 서비스 종료됨 → 빠른 flash-lite 사용 (.env 의 GEMINI_CLASSIFY_MODEL 로 변경 가능)
+GEMINI_MODEL = os.environ.get("GEMINI_CLASSIFY_MODEL", "gemini-3.5-flash-lite")
+GEMINI_URL = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent?key={GEMINI_API_KEY}"
 
 
 async def classify_chat(content: str) -> str:
@@ -78,7 +83,7 @@ async def create_conversation(data: ConversationCreate, db: AsyncSession = Depen
 @router.get("/", response_model=dict)
 async def get_conversations(
     page: int = Query(1, ge=1),
-    size: int = Query(20, ge=1, le=100),
+    size: int = Query(20, ge=1, le=500),
     db: AsyncSession = Depends(get_db)
 ):
     offset = (page - 1) * size
@@ -94,15 +99,23 @@ async def get_conversations(
     )
     items = result.scalars().all()
 
-    for item in items:
-        item.content = decrypt(item.content)
-
+    # items를 그대로 넣으면 500 에러가 나서 dict로 바꿔서 반환
     return {
         "total": total,
         "page": page,
         "size": size,
         "total_pages": (total + size - 1) // size,
-        "items": items
+        "items": [
+            {
+                "id": item.id,
+                "session_id": item.session_id,
+                "role": item.role,
+                "content": decrypt(item.content),
+                "type": item.type,
+                "created_at": item.created_at.isoformat() if item.created_at else None
+            }
+            for item in items
+        ]
     }
 
 

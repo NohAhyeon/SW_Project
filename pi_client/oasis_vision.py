@@ -1,0 +1,353 @@
+"""
+OASIS 비전 — USB 웹캠 하나로 ① 홈캠 실시간 영상 ② 낙상 감지 ③ 비활동 감지를 동시에 한다.
+
+카메라는 한 프로그램만 열 수 있으므로, 기존 camera_stream.py(picamera2, 리본 케이블 카메라용)를
+끄고 이 프로그램 하나로 대체한다. 앱이 보는 주소는 그대로 http://<파이IP>:5000/video 이다.
+
+두 가지 모드
+  ● AI HAT 모드 (기본): Hailo-8 로 사람 자세(관절 17개)를 인식 → 낙상 + 비활동 감지
+      hailo-rpi5-examples 의 basic_pipelines 폴더에 이 파일을 넣고, 그 가상환경에서 실행:
+        source setup_env.sh
+        python basic_pipelines/oasis_vision.py --input usb
+  ● 비상 모드: AI HAT 설정이 안 될 때. 홈캠 + 움직임 기반 비활동 감지만 동작 (낙상 감지 없음)
+        OASIS_NO_HAILO=1 python3 oasis_vision.py
+
+설정 (환경변수, 없으면 기본값)
+  OASIS_BACKEND_URL   백엔드 주소            예) http://192.168.10.69:8000
+  OASIS_INACTIVE_SEC  비활동 알림까지 초      시연 30, 실사용 1800(30분)
+  OASIS_FALL_LYING_SEC 쓰러진 뒤 누워 있는 시간 2
+  OASIS_STREAM_PORT   홈캠 영상 포트          5000
+  OASIS_CAMERA        비상 모드 카메라 번호    0 (/dev/video0)
+
+알림은 백엔드 POST /alert/ 로 보낸다 (type: "낙상" / "비활동"). 낙상이면 사진도 /camera/snapshot 에 올린다.
+"""
+import math
+import os
+import sys
+import threading
+import time
+from collections import deque
+
+import cv2
+import numpy as np
+import requests
+from flask import Flask, Response
+
+BACKEND_URL      = os.getenv("OASIS_BACKEND_URL", "http://192.168.10.69:8000").rstrip("/")
+INACTIVE_SEC     = float(os.getenv("OASIS_INACTIVE_SEC", "30"))
+FALL_LYING_SEC   = float(os.getenv("OASIS_FALL_LYING_SEC", "2"))
+STREAM_PORT      = int(os.getenv("OASIS_STREAM_PORT", "5000"))
+ALERT_COOLDOWN   = float(os.getenv("OASIS_ALERT_COOLDOWN", "60"))
+NO_HAILO         = os.getenv("OASIS_NO_HAILO") == "1"
+
+def _dur(sec: float) -> str:
+    """1800 → '30분', 30 → '30초'"""
+    return f"{int(sec // 60)}분" if sec >= 60 else f"{int(sec)}초"
+
+
+# COCO 17 관절 번호
+NOSE, L_SH, R_SH, L_HIP, R_HIP, L_KNEE, R_KNEE, L_ANK, R_ANK = 0, 5, 6, 11, 12, 13, 14, 15, 16
+SKELETON = [(5, 7), (7, 9), (6, 8), (8, 10), (5, 6), (5, 11), (6, 12), (11, 12),
+            (11, 13), (13, 15), (12, 14), (14, 16), (0, 5), (0, 6)]
+
+
+# ════════════════════════════════════════════════════════════
+#  알림 전송 (같은 종류는 ALERT_COOLDOWN 초에 한 번만)
+# ════════════════════════════════════════════════════════════
+class AlertSender:
+    def __init__(self, backend_url=BACKEND_URL, cooldown=ALERT_COOLDOWN, post=requests.post):
+        self.url, self.cooldown, self._post = backend_url, cooldown, post
+        self._last: dict[str, float] = {}
+        self._lock = threading.Lock()
+
+    def send(self, kind: str, message: str, frame=None) -> bool:
+        with self._lock:
+            now = time.time()
+            if now - self._last.get(kind, 0) < self.cooldown:
+                return False
+            self._last[kind] = now
+        threading.Thread(target=self._send, args=(kind, message, frame), daemon=True).start()
+        return True
+
+    def _send(self, kind, message, frame):
+        try:
+            self._post(f"{self.url}/alert/", json={"type": kind, "message": message}, timeout=5)
+            print(f"[알림 전송] {kind}: {message}")
+            if frame is not None:
+                ok, jpg = cv2.imencode(".jpg", frame)
+                if ok:
+                    self._post(f"{self.url}/camera/snapshot",
+                               files={"file": ("event.jpg", jpg.tobytes(), "image/jpeg")}, timeout=5)
+        except Exception as e:
+            print(f"[알림 전송 실패] {kind}: {e}")
+
+
+# ════════════════════════════════════════════════════════════
+#  낙상 감지 — 관절 좌표 기반
+#    1) 엉덩이가 1초 안에 '키의 35% 이상' 빠르게 내려감 (급격한 하강)
+#    2) 그 뒤 몸이 누운 자세(몸통 기울기 60도 이상 또는 가로로 긴 몸)로 FALL_LYING_SEC 이상 유지
+#    → 둘 다 만족하면 낙상. 천천히 눕는 것(침대)은 1)이 없어서 낙상으로 보지 않는다.
+# ════════════════════════════════════════════════════════════
+class FallDetector:
+    def __init__(self, drop_ratio=0.35, drop_window=1.0, lying_sec=FALL_LYING_SEC,
+                 lying_angle=60.0, min_score=0.3):
+        self.drop_ratio, self.drop_window = drop_ratio, drop_window
+        self.lying_sec, self.lying_angle, self.min_score = lying_sec, lying_angle, min_score
+        self.hist: dict[int, deque] = {}       # 사람별 (시각, 엉덩이y, 키)
+        self.dropped_at: dict[int, float] = {}
+        self.lying_since: dict[int, float] = {}
+        self.last_status: dict[int, str] = {}
+
+    @staticmethod
+    def _mid(kp, a, b):
+        return ((kp[a][0] + kp[b][0]) / 2, (kp[a][1] + kp[b][1]) / 2)
+
+    def posture(self, kp, bbox):
+        """(누운 자세인가, 몸통 각도) — kp: [(x, y, score)]*17 픽셀, bbox: (x1, y1, x2, y2)"""
+        x1, y1, x2, y2 = bbox
+        wide = (x2 - x1) > 1.2 * (y2 - y1)
+        if min(kp[L_SH][2], kp[R_SH][2], kp[L_HIP][2], kp[R_HIP][2]) < self.min_score:
+            return wide, None
+        sx, sy = self._mid(kp, L_SH, R_SH)
+        hx, hy = self._mid(kp, L_HIP, R_HIP)
+        angle = math.degrees(math.atan2(abs(hx - sx), abs(hy - sy) + 1e-6))   # 0 = 서 있음, 90 = 누움
+        return (angle >= self.lying_angle) or wide, angle
+
+    def update(self, pid: int, kp, bbox, now=None) -> bool:
+        """한 프레임 갱신. 이번 프레임에 낙상이 '확정'되면 True"""
+        now = time.time() if now is None else now
+        lying, _ = self.posture(kp, bbox)
+        h = self.hist.setdefault(pid, deque())          # (시각, 엉덩이y, 키, 누운 자세인가)
+        if min(kp[L_HIP][2], kp[R_HIP][2]) >= self.min_score:
+            _, hip_y = self._mid(kp, L_HIP, R_HIP)
+            h.append((now, hip_y, max(bbox[3] - bbox[1], 1.0), lying))
+        while h and now - h[0][0] > self.drop_window:
+            h.popleft()
+        # 급격한 하강: 1초 안에, '서 있던(누워 있지 않던)' 시점보다 엉덩이가 그때 키의 35% 이상 내려감
+        # → 누운 채 뒤척이는 건 시작 자세가 누운 자세라 해당 없음
+        if h and any(not e[3] and h[-1][1] - e[1] >= self.drop_ratio * e[2] for e in h):
+            self.dropped_at[pid] = now
+
+        if lying:
+            self.lying_since.setdefault(pid, now)
+        else:
+            self.lying_since.pop(pid, None)
+
+        recent_drop = now - self.dropped_at.get(pid, -1e9) <= self.drop_window + self.lying_sec + 1
+        fallen = (recent_drop and pid in self.lying_since
+                  and now - self.lying_since[pid] >= self.lying_sec)
+        self.last_status[pid] = "FALL" if fallen else ("LYING" if lying else "OK")
+        if fallen:
+            self.dropped_at.pop(pid, None)       # 같은 낙상으로 중복 알림 방지
+        return fallen
+
+
+# ════════════════════════════════════════════════════════════
+#  비활동 감지 — 사람이 보이는데 INACTIVE_SEC 동안 거의 안 움직이면 알림
+#  (사람이 화면에 없으면 외출로 보고 세지 않는다)
+# ════════════════════════════════════════════════════════════
+class InactivityDetector:
+    def __init__(self, inactive_sec=INACTIVE_SEC, move_ratio=0.03):
+        self.inactive_sec, self.move_ratio = inactive_sec, move_ratio
+        self.last_move = time.time()
+        self.prev = None
+        self.alerted = False
+
+    def idle_seconds(self, now=None):
+        return (time.time() if now is None else now) - self.last_move
+
+    def update_keypoints(self, kp, bbox, now=None) -> bool:
+        now = time.time() if now is None else now
+        pts = np.array([(x, y) for x, y, s in kp if s >= 0.3], dtype=np.float32)
+        size = max(bbox[3] - bbox[1], bbox[2] - bbox[0], 1.0)
+        moved = self.prev is None or len(pts) == 0 or len(self.prev) != len(pts) or \
+            float(np.mean(np.linalg.norm(pts - self.prev, axis=1))) > self.move_ratio * size
+        self.prev = pts
+        return self._tick(moved, now)
+
+    def update_motion(self, motion_ratio: float, now=None) -> bool:
+        """비상 모드용: 화면 중 움직인 픽셀 비율"""
+        return self._tick(motion_ratio > 0.004, time.time() if now is None else now)
+
+    def no_person(self, now=None):
+        self.last_move = time.time() if now is None else now
+        self.prev, self.alerted = None, False
+
+    def _tick(self, moved, now) -> bool:
+        if moved:
+            self.last_move, self.alerted = now, False
+            return False
+        if not self.alerted and now - self.last_move >= self.inactive_sec:
+            self.alerted = True
+            return True
+        return False
+
+
+# ════════════════════════════════════════════════════════════
+#  홈캠 영상 서버 (MJPEG) — 앱이 http://<파이>:5000/video 로 본다
+# ════════════════════════════════════════════════════════════
+class FrameHub:
+    def __init__(self):
+        self._jpg, self._cond = None, threading.Condition()
+
+    def push(self, frame_bgr, quality=70):
+        ok, jpg = cv2.imencode(".jpg", frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, quality])
+        if ok:
+            with self._cond:
+                self._jpg = jpg.tobytes()
+                self._cond.notify_all()
+
+    def latest(self, timeout=2.0):
+        with self._cond:
+            self._cond.wait(timeout)
+            return self._jpg
+
+
+def start_stream_server(hub: FrameHub, port=STREAM_PORT):
+    app = Flask("oasis_vision")
+
+    @app.route("/video")
+    def video():
+        def gen():
+            while True:
+                jpg = hub.latest()
+                if jpg:
+                    yield b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + jpg + b"\r\n"
+        return Response(gen(), mimetype="multipart/x-mixed-replace; boundary=frame")
+
+    @app.route("/snapshot")
+    def snapshot():
+        jpg = hub.latest(0.5)
+        return Response(jpg or b"", mimetype="image/jpeg")
+
+    @app.route("/")
+    def health():
+        return {"status": "ok", "mode": "no-hailo" if NO_HAILO else "hailo"}
+
+    threading.Thread(target=lambda: app.run(host="0.0.0.0", port=port, threaded=True),
+                     daemon=True).start()
+    print(f"[홈캠] http://<파이IP>:{port}/video 에서 실시간 영상 제공")
+
+
+# ════════════════════════════════════════════════════════════
+#  화면 표시 (영상 위 상태 글씨 — OpenCV 는 한글을 못 써서 영어로)
+# ════════════════════════════════════════════════════════════
+def draw_overlay(frame, people, fall_now, idle_sec, inactive_sec):
+    for kp, bbox, status in people:
+        color = (0, 0, 255) if status == "FALL" else (0, 200, 255) if status == "LYING" else (255, 160, 60)
+        for a, b in SKELETON:
+            if kp[a][2] > 0.3 and kp[b][2] > 0.3:
+                cv2.line(frame, (int(kp[a][0]), int(kp[a][1])), (int(kp[b][0]), int(kp[b][1])), color, 2)
+        cv2.rectangle(frame, (int(bbox[0]), int(bbox[1])), (int(bbox[2]), int(bbox[3])), color, 2)
+        cv2.putText(frame, status, (int(bbox[0]), max(int(bbox[1]) - 8, 20)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+    label = "FALL DETECTED" if fall_now else f"idle {int(idle_sec)}s / {int(inactive_sec)}s"
+    cv2.putText(frame, f"OASIS  {time.strftime('%H:%M:%S')}  {label}", (12, 28),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255) if fall_now else (255, 255, 255), 2)
+    return frame
+
+
+# ════════════════════════════════════════════════════════════
+#  AI HAT 모드 (hailo-apps 자세 인식 파이프라인 위에서 동작)
+# ════════════════════════════════════════════════════════════
+def run_hailo():
+    import gi
+    gi.require_version("Gst", "1.0")
+    from gi.repository import Gst
+    import hailo
+    try:   # hailo-apps 버전에 따라 경로가 다르다
+        from hailo_apps.hailo_app_python.core.common.buffer_utils import get_caps_from_pad, get_numpy_from_buffer
+        from hailo_apps.hailo_app_python.core.gstreamer.gstreamer_app import app_callback_class
+        from hailo_apps.hailo_app_python.apps.pose_estimation.pose_estimation_pipeline import GStreamerPoseEstimationApp
+    except ImportError:
+        from hailo_apps_infra.hailo_rpi_common import get_caps_from_pad, get_numpy_from_buffer, app_callback_class
+        from hailo_apps_infra.pose_estimation_pipeline import GStreamerPoseEstimationApp
+
+    hub, alerts = FrameHub(), AlertSender()
+    fall, idle = FallDetector(), InactivityDetector()
+    start_stream_server(hub)
+
+    class UserData(app_callback_class):
+        pass
+
+    def callback(pad, info, user_data):
+        buffer = info.get_buffer()
+        if buffer is None:
+            return Gst.PadProbeReturn.OK
+        fmt, width, height = get_caps_from_pad(pad)
+        if fmt is None or width is None:
+            return Gst.PadProbeReturn.OK
+        frame = cv2.cvtColor(get_numpy_from_buffer(buffer, fmt, width, height), cv2.COLOR_RGB2BGR)
+
+        people, fall_now = [], False
+        roi = hailo.get_roi_from_buffer(buffer)
+        persons = [d for d in roi.get_objects_typed(hailo.HAILO_DETECTION) if d.get_label() == "person"]
+        for i, det in enumerate(persons):
+            b = det.get_bbox()
+            bbox = (b.xmin() * width, b.ymin() * height, b.xmax() * width, b.ymax() * height)
+            ids = det.get_objects_typed(hailo.HAILO_UNIQUE_ID)
+            pid = ids[0].get_id() if len(ids) == 1 else i
+            lms = det.get_objects_typed(hailo.HAILO_LANDMARKS)
+            if not lms:
+                continue
+            kp = [((p.x() * b.width() + b.xmin()) * width, (p.y() * b.height() + b.ymin()) * height,
+                   p.confidence()) for p in lms[0].get_points()]
+            if fall.update(pid, kp, bbox):
+                fall_now = True
+                alerts.send("낙상", "카메라에서 낙상이 감지되었어요. 어르신 상태를 확인해 주세요.", frame.copy())
+            if i == 0 and idle.update_keypoints(kp, bbox):
+                alerts.send("비활동", f"어르신이 {_dur(INACTIVE_SEC)} 넘게 움직이지 않으세요.", frame.copy())
+            people.append((kp, bbox, fall.last_status.get(pid, "OK")))
+        if not persons:
+            idle.no_person()
+
+        hub.push(draw_overlay(frame, people, fall_now, idle.idle_seconds(), INACTIVE_SEC))
+        return Gst.PadProbeReturn.OK
+
+    if "--use-frame" not in sys.argv:
+        sys.argv.append("--use-frame")
+    if "--input" not in sys.argv:
+        sys.argv += ["--input", "usb"]
+    print(f"[AI HAT 모드] 백엔드 {BACKEND_URL} / 비활동 {INACTIVE_SEC}초 / 낙상 후 누움 {FALL_LYING_SEC}초")
+    GStreamerPoseEstimationApp(callback, UserData()).run()
+
+
+# ════════════════════════════════════════════════════════════
+#  비상 모드 (AI HAT 없이: 홈캠 + 움직임 기반 비활동 감지)
+# ════════════════════════════════════════════════════════════
+def run_opencv():
+    cam_index = int(os.getenv("OASIS_CAMERA", "0"))
+    cap = cv2.VideoCapture(cam_index, cv2.CAP_V4L2)
+    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+    if not cap.isOpened():
+        sys.exit(f"카메라 /dev/video{cam_index} 를 열 수 없어요. 'v4l2-ctl --list-devices' 로 번호를 확인하세요.")
+
+    hub, alerts, idle = FrameHub(), AlertSender(), InactivityDetector()
+    mog = cv2.createBackgroundSubtractorMOG2(history=300, varThreshold=32, detectShadows=False)
+    start_stream_server(hub)
+    print(f"[비상 모드] 낙상 감지 없음 / 백엔드 {BACKEND_URL} / 비활동 {INACTIVE_SEC}초")
+
+    while True:
+        ok, frame = cap.read()
+        if not ok:
+            time.sleep(0.2)
+            continue
+        small = cv2.resize(frame, (320, 180))
+        mask = mog.apply(small)
+        motion = float(np.count_nonzero(mask)) / mask.size
+        if idle.update_motion(motion):
+            alerts.send("비활동", f"{_dur(INACTIVE_SEC)} 넘게 움직임이 없어요.", frame.copy())
+        hub.push(draw_overlay(frame, [], False, idle.idle_seconds(), INACTIVE_SEC))
+
+
+if __name__ == "__main__":
+    if NO_HAILO:
+        run_opencv()
+    else:
+        try:
+            run_hailo()
+        except ImportError as e:
+            print(f"[AI HAT 모듈 없음: {e}] → 비상 모드로 실행합니다 (낙상 감지 없음)")
+            run_opencv()

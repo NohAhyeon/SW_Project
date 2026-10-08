@@ -1,6 +1,10 @@
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
+from datetime import datetime
+
+# created_at 은 datetime.now(한국 시간)로 저장한다.
+# func.now() 는 SQLite 에서 UTC 로 저장되어 앱에 9시간 어긋나게 보였다.
 from database import Base
 
 
@@ -19,7 +23,7 @@ class User(Base):
     phone = Column(String, nullable=True)
     address = Column(String, nullable=True)
     is_active = Column(Boolean, default=True)
-    created_at = Column(DateTime, default=func.now())
+    created_at = Column(DateTime, default=datetime.now)
 
     # 보호자 → 어르신 관계 (보호자 측)
     guarding = relationship("GuardianRelation", foreign_keys="GuardianRelation.guardian_id", back_populates="guardian")
@@ -35,7 +39,7 @@ class GuardianRelation(Base):
     guardian_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     senior_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     label = Column(String, nullable=True)         # 보호자가 붙인 어르신 별명 (예: "어머니")
-    created_at = Column(DateTime, default=func.now())
+    created_at = Column(DateTime, default=datetime.now)
 
     guardian = relationship("User", foreign_keys=[guardian_id], back_populates="guarding")
     senior = relationship("User", foreign_keys=[senior_id], back_populates="guarded_by")
@@ -51,7 +55,7 @@ class Conversation(Base):
     role = Column(String)
     content = Column(String)
     type = Column(String, default="생활정보")
-    created_at = Column(DateTime, default=func.now())
+    created_at = Column(DateTime, default=datetime.now)
 
     senior = relationship("User", foreign_keys=[senior_id])
 
@@ -95,6 +99,15 @@ class Alert(Base):
     type = Column(String)
     message = Column(String)
     is_resolved = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=func.now())
+    created_at = Column(DateTime, default=datetime.now)
 
     senior = relationship("User", foreign_keys=[senior_id])
+
+
+# 설정 테이블
+class Setting(Base):
+    __tablename__ = "settings"
+
+    id = Column(Integer, primary_key=True, index=True)
+    key = Column(String, unique=True, index=True)
+    value = Column(String)

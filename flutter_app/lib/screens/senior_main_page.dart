@@ -1,23 +1,33 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../data/api_service.dart';
 import '../main.dart';
 import '../pages/camera_page.dart';
 
-// ── DESIGN TOKENS ────────────────────────────────────────────
-const _bg        = Color(0xFFF7F8FA);
+// ── DESIGN TOKENS (Toss-style flat system) ─────────────────
+// 원칙: 그림자 대신 면 색 차이(흰 카드 / 회색 배경)로 구분하고,
+//       강조색은 블루 하나만 쓴다. 빨강은 긴급 상황에만 쓴다.
+// 글자색은 배경 대비 4.5:1 이상 (어르신 가독성)
+const _bg        = Color(0xFFF2F4F6);
 const _surface   = Colors.white;
-const _line      = Color(0xFFEAECEF);
+const _line      = Color(0xFFEDF0F3);
 const _text1     = Color(0xFF191F28);
 const _text2     = Color(0xFF4E5968);
-const _text3     = Color(0xFF8B95A1);
-const _brand     = Color(0xFF3182F6);
-const _brandSoft = Color(0xFFE8F2FE);
-const _danger    = Color(0xFFF04452);
-const _dangerSoft= Color(0xFFFDECEE);
-const _warning   = Color(0xFFFF8A00);
-const _warnSoft  = Color(0xFFFFF3E5);
-const _success   = Color(0xFF00B96B);
-const _sucSoft   = Color(0xFFE5F8EF);
+const _text3     = Color(0xFF6B7684);
+const _text4     = Color(0xFFB0B8C1);
+const _brand     = Color(0xFF2F6FEB);
+const _brandSoft = Color(0xFFE8F1FF);
+const _sky       = _brand;
+const _skySoft   = _brandSoft;
+const _done      = Color(0xFF4E5968);
+const _doneSoft  = Color(0xFFF2F4F6);
+const _danger    = Color(0xFFE42939);
+const _dangerSoft= Color(0xFFFDEEEF);
+const _heroGradient = LinearGradient(
+  colors: [Color(0xFF2F6FEB), Color(0xFF4A86F2)],
+  begin: Alignment.topLeft,
+  end: Alignment.bottomRight,
+);
 
 // 폰트 크기 — 보호자(일반) / 어르신(심플)
 const double _fXs = 14, _fSm = 16, _fMd = 18, _fLg = 22, _fXl = 28;
@@ -103,15 +113,15 @@ class _NavBar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final items = seniorView
-        ? [_NI('🏠', '홈', 0, current, onTap, senior: true),
-           _NI('💊', '복약', 1, current, onTap, senior: true),
-           _NI('📅', '일정', 2, current, onTap, senior: true)]
-        : [_NI('🏠', '홈', 0, current, onTap),
-           _NI('💊', '복약', 1, current, onTap),
-           _NI('📅', '일정', 2, current, onTap),
-           _NI('💬', '기록', 3, current, onTap),
-           _NI('📹', '홈캠', 4, current, onTap),
-           _NI('⚙️', '설정', 5, current, onTap)];
+        ? [_NI(Icons.home_rounded, '홈', 0, current, onTap, senior: true),
+           _NI(Icons.medication_rounded, '복약', 1, current, onTap, senior: true),
+           _NI(Icons.calendar_month_rounded, '일정', 2, current, onTap, senior: true)]
+        : [_NI(Icons.home_rounded, '홈', 0, current, onTap),
+           _NI(Icons.medication_rounded, '복약', 1, current, onTap),
+           _NI(Icons.calendar_month_rounded, '일정', 2, current, onTap),
+           _NI(Icons.forum_rounded, '기록', 3, current, onTap),
+           _NI(Icons.videocam_rounded, '홈캠', 4, current, onTap),
+           _NI(Icons.settings_rounded, '설정', 5, current, onTap)];
     return Container(
       decoration: const BoxDecoration(
         color: _surface,
@@ -119,18 +129,22 @@ class _NavBar extends StatelessWidget {
       ),
       child: SafeArea(
         top: false,
-        child: Row(children: items),
+        child: Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Row(children: items),
+        ),
       ),
     );
   }
 }
 
 class _NI extends StatelessWidget {
-  final String emoji, label;
+  final IconData icon;
+  final String label;
   final int index, current;
   final void Function(int) onTap;
   final bool senior;
-  const _NI(this.emoji, this.label, this.index, this.current, this.onTap,
+  const _NI(this.icon, this.label, this.index, this.current, this.onTap,
       {this.senior = false});
 
   @override
@@ -145,13 +159,15 @@ class _NI extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(emoji, style: TextStyle(fontSize: senior ? 28 : 22)),
+              Icon(icon,
+                  size: senior ? 30 : 25,
+                  color: active ? _text1 : _text4),
               SizedBox(height: senior ? 5 : 3),
               Text(label,
                   style: TextStyle(
                     fontSize: senior ? 14 : 11,
                     fontWeight: active ? FontWeight.w700 : FontWeight.w500,
-                    color: active ? _brand : _text3,
+                    color: active ? _text1 : _text3,
                   )),
             ],
           ),
@@ -218,548 +234,235 @@ class _HomeTabState extends State<_HomeTab> {
   Widget build(BuildContext context) {
     final s   = widget.seniorView;
     final now = DateTime.now();
-    final fXs = s ? _sXs : _fXs;
-    final fSm = s ? _sSm : _fSm;
-    final fMd = s ? _sMd : _fMd;
-    final fXl = s ? _sXl : _fXl;
 
     final medDone  = _meds.where((m) => m['taken'] == true).length;
     final medTotal = _meds.length;
     final todayStr = _dateStr(now);
     final todayScheds = _scheds.where((sc) =>
-        (sc['time']?.toString() ?? '').startsWith(todayStr)).toList();
+        (sc['time']?.toString() ?? '').startsWith(todayStr)).toList()
+      ..sort((a, b) => (a['time']?.toString() ?? '').compareTo(b['time']?.toString() ?? ''));
     final todaySchedDone  = todayScheds.where((sc) => sc['status'] == '완료').length;
     final todaySchedTotal = todayScheds.length;
+    final nextSched = todayScheds.cast<Map?>().firstWhere(
+        (sc) => sc!['status'] != '완료' && sc['status'] != '취소',
+        orElse: () => null);
 
     // 센서 알림 상태
     final hasInactivity = _alerts.any((a) => a['type'] == '비활동' && a['status'] == '처리 중');
     final hasGas        = _alerts.any((a) => a['type'] == '가스' && a['status'] == '처리 중');
     final hasFall       = _alerts.any((a) => a['type'] == '낙상' && a['status'] == '처리 중');
+    final anyAlert      = hasInactivity || hasGas || hasFall;
+    final alertText = [
+      if (hasGas) '가스 누출',
+      if (hasFall) '낙상',
+      if (hasInactivity) '장시간 움직임 없음',
+    ].join(', ');
 
-    // 인사말 이름 — 보호자 뷰는 보호자 이름, 어르신 뷰는 어르신 이름
-    final greetName   = s ? widget.displayName
+    // 인사말 — 보호자 뷰는 보호자 이름, 어르신 뷰는 어르신 이름
+    final greetName = s ? widget.displayName
         : (AppState.nickname ?? AppState.username ?? '보호자');
-    final greetSuffix = s ? '님 😊' : ' 보호자님 😊';
+    final hello = now.hour < 12 ? '좋은 아침이에요' : (now.hour < 18 ? '좋은 오후예요' : '편안한 저녁 되세요');
+    final headline = s ? '$greetName님,\n$hello' : '$greetName님,\n오늘도 안심하세요';
+
+    // 복약/일정 요약 문구
+    final medSub = medTotal == 0
+        ? '등록된 약이 없어요'
+        : (medDone == medTotal ? '오늘 약을 모두 드셨어요' : '${medTotal - medDone}개 남았어요');
+    final schedSub = todaySchedTotal == 0
+        ? '오늘은 일정이 없어요'
+        : (nextSched == null
+            ? '오늘 일정을 모두 마쳤어요'
+            : '다음 ${_fmtTime(nextSched['time']?.toString() ?? '')} ${nextSched['title'] ?? '일정'}');
 
     return SafeArea(
       child: RefreshIndicator(
         onRefresh: _load,
         color: _brand,
-        child: SingleChildScrollView(
+        child: ListView(
           physics: const AlwaysScrollableScrollPhysics(),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // ── 상단 바 ──────────────────────────────────
-              Container(
-                color: _surface,
-                padding: const EdgeInsets.fromLTRB(20, 14, 16, 16),
-                child: Row(
-                  children: [
-                    RichText(
-                      text: const TextSpan(
-                        style: TextStyle(
-                            fontSize: 22,
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: -0.5),
-                        children: [
-                          TextSpan(text: 'OA', style: TextStyle(color: _text1)),
-                          TextSpan(text: 'SIS', style: TextStyle(color: _brand)),
-                        ],
-                      ),
-                    ),
-                    const Spacer(),
-                    // 보호자 ↔ 어르신 뷰 전환
-                    GestureDetector(
-                      onTap: widget.onToggleView,
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                        decoration: BoxDecoration(
-                          color: s ? _brand : _bg,
-                          borderRadius: BorderRadius.circular(99),
-                        ),
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(s ? '👵' : '👤',
-                                style: const TextStyle(fontSize: 14)),
-                            const SizedBox(width: 4),
-                            Text(s ? '어르신' : '보호자',
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w700,
-                                  color: s ? Colors.white : _text3,
-                                )),
-                          ],
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 4),
-                    // 설정 아이콘 (종 → 설정으로 변경)
-                    GestureDetector(
-                      onTap: widget.onGoSettings,
-                      child: SizedBox(
-                        width: 44, height: 44,
-                        child: Center(
-                          child: Icon(Icons.settings_rounded,
-                              color: _text2, size: s ? 26 : 22),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-
-              // ── 인사 + 날씨 카드 (전체 너비, 균형 레이아웃) ──
-              Container(
-                width: double.infinity,
-                margin: EdgeInsets.fromLTRB(16, 16, 16, 0),
-                padding: EdgeInsets.fromLTRB(22, s ? 30 : 22, 22, s ? 30 : 22),
-                decoration: BoxDecoration(
-                  gradient: const LinearGradient(
-                    colors: [Color(0xFF4FA8FF), Color(0xFF7B6FFF)],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
+          padding: const EdgeInsets.only(bottom: 32),
+          children: [
+            // ── 상단 바 ─────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 10, 8, 0),
+              child: Row(
+                children: [
+                  const Text('OASIS',
+                      style: TextStyle(
+                          fontSize: 20,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: -0.3,
+                          color: _text1)),
+                  const Spacer(),
+                  _ViewToggle(senior: s, onTap: widget.onToggleView),
+                  IconButton(
+                    onPressed: widget.onGoSettings,
+                    icon: Icon(Icons.settings_outlined, color: _text2, size: s ? 28 : 24),
                   ),
-                  borderRadius: BorderRadius.circular(20),
-                  boxShadow: [
-                    BoxShadow(
-                        color: const Color(0xFF637CFF).withOpacity(0.25),
-                        blurRadius: 24,
-                        offset: const Offset(0, 8))
+                ],
+              ),
+            ),
+
+            // ── 인사말 (카드 없이 큰 글씨) ───────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 20, 24, 24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('${now.month}월 ${now.day}일 ${_weekday(now.weekday)}',
+                      style: TextStyle(
+                          fontSize: s ? 18 : 15,
+                          color: _text3,
+                          fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 8),
+                  Text(headline,
+                      style: TextStyle(
+                          fontSize: s ? 32 : 26,
+                          height: 1.35,
+                          letterSpacing: -0.6,
+                          fontWeight: FontWeight.w800,
+                          color: _text1)),
+                ],
+              ),
+            ),
+
+            if (_loading)
+              const Padding(
+                padding: EdgeInsets.only(top: 60),
+                child: Center(child: CircularProgressIndicator(color: _brand)),
+              )
+            else ...[
+              // ── 1. 안심 상태 ───────────────────────────
+              _HomeCard(
+                onTap: widget.onGoCam,
+                child: Column(
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          width: s ? 60 : 52, height: s ? 60 : 52,
+                          decoration: BoxDecoration(
+                            color: anyAlert ? _dangerSoft : _brandSoft,
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                              anyAlert ? Icons.priority_high_rounded : Icons.check_rounded,
+                              color: anyAlert ? _danger : _brand,
+                              size: s ? 34 : 30),
+                        ),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('지금 집 안은',
+                                  style: TextStyle(fontSize: s ? 17 : 14, color: _text3, fontWeight: FontWeight.w600)),
+                              const SizedBox(height: 4),
+                              Text(anyAlert ? '$alertText 감지' : '모두 안전해요',
+                                  style: TextStyle(
+                                      fontSize: s ? 24 : 20,
+                                      fontWeight: FontWeight.w800,
+                                      letterSpacing: -0.4,
+                                      color: anyAlert ? _danger : _text1)),
+                            ],
+                          ),
+                        ),
+                        Icon(Icons.chevron_right_rounded, color: _text4, size: s ? 30 : 26),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+                    Container(height: 1, color: _line),
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        _SensorDot(label: '가스', alert: hasGas, senior: s),
+                        _SensorDot(label: '움직임', alert: hasInactivity, senior: s),
+                        _SensorDot(label: '낙상', alert: hasFall, senior: s),
+                      ],
+                    ),
                   ],
                 ),
-                child: s
-                    // ── 어르신 뷰: 중앙 정렬, 대형 ─────────────
-                    ? Column(
-                        crossAxisAlignment: CrossAxisAlignment.center,
-                        children: [
-                          if (_weather != null) ...[
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Text(_weatherEmoji(_weather!['main']),
-                                    style: const TextStyle(fontSize: 28)),
-                                const SizedBox(width: 8),
-                                Text('${_weather!['temp']}°C  ${_weather!['desc']}',
-                                    style: TextStyle(
-                                        fontSize: fXs,
-                                        color: Colors.white.withOpacity(0.9),
-                                        fontWeight: FontWeight.w700)),
-                              ],
-                            ),
-                            const SizedBox(height: 10),
-                          ],
-                          Text(
-                            '${now.year}년 ${now.month}월 ${now.day}일 ${_weekday(now.weekday)}',
-                            style: TextStyle(
-                                fontSize: fXs,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.white.withOpacity(0.85)),
-                            textAlign: TextAlign.center,
-                          ),
-                          const SizedBox(height: 10),
-                          Text(
-                            '안녕하세요,\n$greetName$greetSuffix',
-                            style: TextStyle(
-                                fontSize: fXl,
-                                fontWeight: FontWeight.w900,
-                                color: Colors.white,
-                                height: 1.2,
-                                letterSpacing: -1),
-                            textAlign: TextAlign.center,
-                          ),
-                          const SizedBox(height: 18),
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 18, vertical: 10),
-                            decoration: BoxDecoration(
-                              color: Colors.white.withOpacity(0.2),
-                              borderRadius: BorderRadius.circular(99),
-                            ),
-                            child: Text(
-                              '✅ 오늘도 건강하게 지내세요',
-                              style: TextStyle(
-                                  fontSize: fXs,
-                                  fontWeight: FontWeight.w700,
-                                  color: Colors.white),
-                            ),
-                          ),
-                        ],
-                      )
-                    // ── 보호자 뷰: 좌우 레이아웃 ───────────────
-                    : Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  '${now.year}년 ${now.month}월 ${now.day}일 ${_weekday(now.weekday)}',
-                                  style: TextStyle(
-                                      fontSize: fXs,
-                                      fontWeight: FontWeight.w600,
-                                      color: Colors.white.withOpacity(0.9)),
-                                ),
-                                const SizedBox(height: 6),
-                                Text(
-                                  '안녕하세요,\n$greetName$greetSuffix',
-                                  style: TextStyle(
-                                      fontSize: fXl,
-                                      fontWeight: FontWeight.w800,
-                                      color: Colors.white,
-                                      height: 1.2,
-                                      letterSpacing: -0.5),
-                                ),
-                                const SizedBox(height: 14),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                      horizontal: 14, vertical: 8),
-                                  decoration: BoxDecoration(
-                                    color: Colors.white.withOpacity(0.2),
-                                    borderRadius: BorderRadius.circular(99),
-                                  ),
-                                  child: Text(
-                                    '✅ 오늘도 건강하게 지내세요',
-                                    style: TextStyle(
-                                        fontSize: fXs,
-                                        fontWeight: FontWeight.w700,
-                                        color: Colors.white),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                          // 날씨 위젯
-                          if (_weather != null) ...[
-                            const SizedBox(width: 12),
-                            Column(
-                              crossAxisAlignment: CrossAxisAlignment.end,
-                              children: [
-                                Text(_weatherEmoji(_weather!['main']),
-                                    style: const TextStyle(fontSize: 38)),
-                                const SizedBox(height: 4),
-                                Text('${_weather!['temp']}°',
-                                    style: const TextStyle(
-                                        fontSize: 26,
-                                        fontWeight: FontWeight.w800,
-                                        color: Colors.white,
-                                        height: 1)),
-                                const SizedBox(height: 2),
-                                Text(
-                                  _weather!['desc'],
-                                  style: TextStyle(
-                                      fontSize: 11,
-                                      color: Colors.white.withOpacity(0.8),
-                                      fontWeight: FontWeight.w500),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ],
-                      ),
               ),
 
-              // ── 빠른 요약 칩 ──────────────────────────────
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 14, 16, 0),
-                child: Row(
+              // ── 2. 오늘 챙길 것 ─────────────────────────
+              _HomeCard(
+                padding: const EdgeInsets.fromLTRB(22, 22, 22, 10),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    _QuickChip(
-                      emoji: '💊',
-                      color: _success,
-                      softColor: _sucSoft,
-                      label: _loading ? '…' : '$medDone/$medTotal 완료',
+                    Text('오늘 챙길 것',
+                        style: TextStyle(
+                            fontSize: s ? 22 : 18,
+                            fontWeight: FontWeight.w800,
+                            letterSpacing: -0.3,
+                            color: _text1)),
+                    const SizedBox(height: 8),
+                    _HomeRow(
+                      icon: Icons.medication_rounded,
+                      title: '복약',
+                      sub: medSub,
+                      trailing: medTotal == 0 ? null : '$medDone/$medTotal',
+                      done: medTotal > 0 && medDone == medTotal,
+                      progress: medTotal == 0 ? null : medDone / medTotal,
+                      senior: s,
                       onTap: widget.onGoMed,
                     ),
-                    const SizedBox(width: 10),
-                    _QuickChip(
-                      emoji: '📅',
-                      color: _warning,
-                      softColor: _warnSoft,
-                      label: _loading ? '…' : '$todaySchedDone/${todaySchedTotal == 0 ? 0 : todaySchedTotal}건 완료',
+                    Container(height: 1, color: _line, margin: const EdgeInsets.only(left: 60)),
+                    _HomeRow(
+                      icon: Icons.calendar_today_rounded,
+                      title: '일정',
+                      sub: schedSub,
+                      trailing: todaySchedTotal == 0 ? null : '$todaySchedDone/$todaySchedTotal',
+                      done: todaySchedTotal > 0 && todaySchedDone == todaySchedTotal,
+                      progress: todaySchedTotal == 0 ? null : todaySchedDone / todaySchedTotal,
+                      senior: s,
                       onTap: widget.onGoSched,
                     ),
                   ],
                 ),
               ),
 
-              // ── 복약 현황 카드 (실시간) ───────────────────
-              if (!_loading) ...[
-                Container(
-                  margin: const EdgeInsets.fromLTRB(16, 14, 16, 0),
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: _surface,
-                    borderRadius: BorderRadius.circular(20),
-                    boxShadow: [
-                      BoxShadow(
-                          color: Colors.black.withOpacity(0.04),
-                          blurRadius: 12)
-                    ],
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+              // ── 3. 날씨 ─────────────────────────────────
+              if (_weather != null)
+                _HomeCard(
+                  child: Row(
                     children: [
-                      Row(
-                        children: [
-                          Expanded(
-                              child: Text('💊 오늘 복약 현황',
-                                  style: TextStyle(
-                                      fontSize: s ? _sMd : _fMd,
-                                      fontWeight: FontWeight.w800,
-                                      color: _text1))),
-                          GestureDetector(
-                            onTap: widget.onGoMed,
-                            child: const Text('자세히 ›',
+                      Text(_weatherEmoji(_weather!['main']),
+                          style: TextStyle(fontSize: s ? 40 : 34)),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('부산 ${_weather!['temp']}°',
                                 style: TextStyle(
-                                    fontSize: 13,
-                                    color: _brand,
-                                    fontWeight: FontWeight.w700)),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(99),
-                        child: LinearProgressIndicator(
-                          value: medTotal > 0 ? medDone / medTotal : 0,
-                          minHeight: s ? 16 : 12,
-                          backgroundColor: _bg,
-                          valueColor:
-                              const AlwaysStoppedAnimation(_success),
+                                    fontSize: s ? 24 : 20,
+                                    fontWeight: FontWeight.w800,
+                                    color: _text1)),
+                            const SizedBox(height: 2),
+                            Text(_weatherTip(_weather!),
+                                style: TextStyle(fontSize: s ? 17 : 14, color: _text3, fontWeight: FontWeight.w500)),
+                          ],
                         ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        medTotal == 0
-                            ? '등록된 복약이 없어요'
-                            : (medDone == medTotal
-                                ? '✅ 모두 완료했어요!'
-                                : '$medTotal개 중 $medDone개 완료 · ${medTotal - medDone}개 남음'),
-                        style: TextStyle(
-                            fontSize: s ? _sSm : _fSm,
-                            fontWeight: FontWeight.w700,
-                            color: _success),
                       ),
                     ],
                   ),
                 ),
-
-                // ── 오늘 일정 현황 카드 (항상 표시) ──────────
-                Container(
-                  margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: _surface,
-                    borderRadius: BorderRadius.circular(20),
-                    boxShadow: [
-                      BoxShadow(
-                          color: Colors.black.withOpacity(0.04),
-                          blurRadius: 12)
-                    ],
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                              child: Text('📅 오늘 일정 현황',
-                                  style: TextStyle(
-                                      fontSize: s ? _sMd : _fMd,
-                                      fontWeight: FontWeight.w800,
-                                      color: _text1))),
-                          GestureDetector(
-                            onTap: widget.onGoSched,
-                            child: const Text('자세히 ›',
-                                style: TextStyle(
-                                    fontSize: 13,
-                                    color: _brand,
-                                    fontWeight: FontWeight.w700)),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 12),
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(99),
-                        child: LinearProgressIndicator(
-                          value: todaySchedTotal > 0
-                              ? todaySchedDone / todaySchedTotal
-                              : 0,
-                          minHeight: s ? 16 : 12,
-                          backgroundColor: _bg,
-                          valueColor:
-                              const AlwaysStoppedAnimation(_warning),
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        todaySchedTotal == 0
-                            ? '오늘 일정이 없어요'
-                            : (todaySchedDone == todaySchedTotal
-                                ? '✅ 모든 일정 완료!'
-                                : '$todaySchedTotal건 중 $todaySchedDone건 완료 · ${todaySchedTotal - todaySchedDone}건 남음'),
-                        style: TextStyle(
-                            fontSize: s ? _sSm : _fSm,
-                            fontWeight: FontWeight.w700,
-                            color: _warning),
-                      ),
-                      // 일정 목록 미리보기 (최대 2개)
-                      if (todayScheds.isNotEmpty) ...[
-                        const SizedBox(height: 14),
-                        const Divider(height: 1, color: _line),
-                        const SizedBox(height: 12),
-                        ...todayScheds.take(2).map((sc) {
-                          final t     = _fmtTime(sc['time']?.toString() ?? '');
-                          final isDone = sc['status'] == '완료';
-                          return Padding(
-                            padding: const EdgeInsets.only(bottom: 8),
-                            child: Row(
-                              children: [
-                                Container(
-                                  width: 46,
-                                  child: Text(t,
-                                      style: TextStyle(
-                                          fontSize: s ? _sSm : _fSm,
-                                          fontWeight: FontWeight.w700,
-                                          color: isDone ? _text3 : _brand)),
-                                ),
-                                const SizedBox(width: 8),
-                                Expanded(
-                                    child: Text(
-                                        sc['title'] as String? ?? '일정',
-                                        style: TextStyle(
-                                            fontSize: s ? _sSm : _fSm,
-                                            fontWeight: FontWeight.w600,
-                                            color: isDone ? _text3 : _text1,
-                                            decoration: isDone
-                                                ? TextDecoration.lineThrough
-                                                : null))),
-                                if (isDone)
-                                  const Icon(Icons.check_circle_rounded,
-                                      color: _success, size: 16),
-                              ],
-                            ),
-                          );
-                        }),
-                        if (todayScheds.length > 2)
-                          Padding(
-                            padding: const EdgeInsets.only(top: 4),
-                            child: Text(
-                              '+ ${todayScheds.length - 2}건 더 있어요',
-                              style: const TextStyle(
-                                  fontSize: 12,
-                                  color: _text3,
-                                  fontWeight: FontWeight.w600),
-                            ),
-                          ),
-                      ],
-                    ],
-                  ),
-                ),
-              ],
-
-              // ── 센서 모니터링 요약 카드 ──────────────────
-              if (!_loading)
-                Container(
-                  margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: _surface,
-                    borderRadius: BorderRadius.circular(20),
-                    boxShadow: [
-                      BoxShadow(
-                          color: Colors.black.withOpacity(0.04),
-                          blurRadius: 12)
-                    ],
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                              child: Text('🔍 센서 모니터링',
-                                  style: TextStyle(
-                                      fontSize: s ? _sMd : _fMd,
-                                      fontWeight: FontWeight.w800,
-                                      color: _text1))),
-                          GestureDetector(
-                            onTap: widget.onGoCam,
-                            child: const Text('자세히 ›',
-                                style: TextStyle(
-                                    fontSize: 13,
-                                    color: _brand,
-                                    fontWeight: FontWeight.w700)),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 14),
-                      Row(
-                        children: [
-                          Expanded(
-                              child: _SensorMiniCard(
-                                  icon: Icons.accessibility_new_rounded,
-                                  label: '비활동',
-                                  isAlert: hasInactivity)),
-                          const SizedBox(width: 8),
-                          Expanded(
-                              child: _SensorMiniCard(
-                                  icon: Icons.local_fire_department_rounded,
-                                  label: '가스',
-                                  isAlert: hasGas)),
-                          const SizedBox(width: 8),
-                          Expanded(
-                              child: _SensorMiniCard(
-                                  icon: Icons.personal_injury_rounded,
-                                  label: '낙상',
-                                  isAlert: hasFall)),
-                        ],
-                      ),
-                      if (hasInactivity || hasGas || hasFall) ...[
-                        const SizedBox(height: 12),
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 10),
-                          decoration: BoxDecoration(
-                            color: _dangerSoft,
-                            borderRadius: BorderRadius.circular(12),
-                          ),
-                          child: Row(
-                            children: [
-                              const Icon(Icons.warning_amber_rounded,
-                                  color: _danger, size: 16),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  [
-                                    if (hasInactivity) '비활동 감지',
-                                    if (hasGas) '가스 누출 감지',
-                                    if (hasFall) '낙상 감지',
-                                  ].join(' · '),
-                                  style: const TextStyle(
-                                      fontSize: 13,
-                                      fontWeight: FontWeight.w700,
-                                      color: _danger),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-
-              const SizedBox(height: 32),
             ],
-          ),
+          ],
         ),
       ),
     );
+  }
+
+  String _weatherTip(Map<String, dynamic> w) {
+    final temp = (w['temp'] as num?)?.toInt() ?? 20;
+    final main = w['main'] as String? ?? '';
+    if (main == 'Rain' || main == 'Drizzle' || main == 'Thunderstorm') return '비 소식이 있어요. 외출 시 우산을 챙기세요';
+    if (main == 'Snow') return '눈이 와요. 미끄럼에 조심하세요';
+    if (temp >= 30) return '더운 날이에요. 물을 자주 드세요';
+    if (temp <= 5) return '쌀쌀해요. 따뜻하게 입으세요';
+    return '${w['desc']} · 산책하기 좋은 날씨예요';
   }
 
   String _dateStr(DateTime d) =>
@@ -782,13 +485,217 @@ class _HomeTabState extends State<_HomeTab> {
   }
 }
 
+// ── 홈 공용: 흰 카드 (그림자·테두리 없이 면 색 차이로만 구분)
+class _HomeCard extends StatelessWidget {
+  final Widget child;
+  final VoidCallback? onTap;
+  final EdgeInsets padding;
+  const _HomeCard({required this.child, this.onTap, this.padding = const EdgeInsets.all(22)});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+      child: Material(
+        color: _surface,
+        borderRadius: BorderRadius.circular(24),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(padding: padding, child: child),
+        ),
+      ),
+    );
+  }
+}
+
+// ── 보호자/어르신 화면 전환 토글
+class _ViewToggle extends StatelessWidget {
+  final bool senior;
+  final VoidCallback onTap;
+  const _ViewToggle({required this.senior, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    Widget seg(String label, bool on) => AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+          decoration: BoxDecoration(
+            color: on ? _surface : Colors.transparent,
+            borderRadius: BorderRadius.circular(99),
+          ),
+          child: Text(label,
+              style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: on ? FontWeight.w700 : FontWeight.w500,
+                  color: on ? _text1 : _text3)),
+        );
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(3),
+        decoration: BoxDecoration(
+          color: _line,
+          borderRadius: BorderRadius.circular(99),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [seg('보호자', !senior), seg('어르신', senior)],
+        ),
+      ),
+    );
+  }
+}
+
+// ── 센서 상태 점 (안심 상태 카드 하단)
+class _SensorDot extends StatelessWidget {
+  final String label;
+  final bool alert, senior;
+  const _SensorDot({required this.label, required this.alert, required this.senior});
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            width: 8, height: 8,
+            decoration: BoxDecoration(
+              color: alert ? _danger : _brand,
+              shape: BoxShape.circle,
+            ),
+          ),
+          const SizedBox(width: 6),
+          Text(label,
+              style: TextStyle(fontSize: senior ? 17 : 14, color: _text2, fontWeight: FontWeight.w600)),
+          const SizedBox(width: 4),
+          Text(alert ? '감지' : '정상',
+              style: TextStyle(
+                  fontSize: senior ? 17 : 14,
+                  fontWeight: FontWeight.w700,
+                  color: alert ? _danger : _text3)),
+        ],
+      ),
+    );
+  }
+}
+
+// ── 리스트 행: 아이콘 원 + 제목/설명 + 오른쪽 진행 상황
+class _HomeRow extends StatelessWidget {
+  final IconData icon;
+  final String title, sub;
+  final String? trailing;
+  final double? progress;
+  final bool done, senior;
+  final VoidCallback onTap;
+  const _HomeRow({
+    required this.icon, required this.title, required this.sub,
+    this.trailing, this.progress, required this.done,
+    required this.senior, required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final box = senior ? 52.0 : 44.0;
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        child: Row(
+          children: [
+            Container(
+              width: box, height: box,
+              decoration: const BoxDecoration(color: _brandSoft, shape: BoxShape.circle),
+              child: Icon(icon, color: _brand, size: box * 0.5),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title,
+                      style: TextStyle(
+                          fontSize: senior ? 21 : 17,
+                          fontWeight: FontWeight.w700,
+                          color: _text1)),
+                  const SizedBox(height: 3),
+                  Text(sub,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                          fontSize: senior ? 17 : 14,
+                          color: done ? _brand : _text3,
+                          fontWeight: FontWeight.w500)),
+                ],
+              ),
+            ),
+            if (progress != null) ...[
+              SizedBox(
+                width: senior ? 50 : 44, height: senior ? 50 : 44,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    SizedBox.expand(
+                      child: CircularProgressIndicator(
+                        value: progress,
+                        strokeWidth: 4,
+                        strokeCap: StrokeCap.round,
+                        backgroundColor: _line,
+                        valueColor: const AlwaysStoppedAnimation(_brand),
+                      ),
+                    ),
+                    done
+                        ? Icon(Icons.check_rounded, color: _brand, size: senior ? 24 : 20)
+                        : Text(trailing ?? '',
+                            style: TextStyle(
+                                fontSize: senior ? 13 : 11,
+                                fontWeight: FontWeight.w800,
+                                color: _text1)),
+                  ],
+                ),
+              ),
+            ] else
+              Icon(Icons.chevron_right_rounded, color: _text4, size: senior ? 30 : 26),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── 아이콘 배지: 연한 배경 + 아이콘 (이모지 대신 통일된 아이콘 사용)
+class _TitleBadge extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+  final double size;
+  const _TitleBadge({required this.icon, required this.color, this.size = 32, bool large = false})
+      : _large = large;
+  final bool _large;
+
+  @override
+  Widget build(BuildContext context) {
+    final box = _large && size == 32 ? 40.0 : size;
+    return Container(
+      width: box, height: box,
+      decoration: BoxDecoration(
+        color: Color.alphaBlend(color.withOpacity(0.10), Colors.white),
+        borderRadius: BorderRadius.circular(box * 0.3),
+      ),
+      child: Icon(icon, size: box * 0.56, color: color),
+    );
+  }
+}
+
 // ── 빠른 요약 칩 위젯
 class _QuickChip extends StatelessWidget {
-  final String emoji, label;
+  final IconData icon;
+  final String label;
   final Color color, softColor;
   final VoidCallback onTap;
   const _QuickChip({
-    required this.emoji, required this.label,
+    required this.icon, required this.label,
     required this.color, required this.softColor, required this.onTap,
   });
 
@@ -806,7 +713,14 @@ class _QuickChip extends StatelessWidget {
           ),
           child: Row(
             children: [
-              Text(emoji, style: const TextStyle(fontSize: 22)),
+              Container(
+                width: 34, height: 34,
+                decoration: BoxDecoration(
+                  color: _surface,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(icon, size: 20, color: color),
+              ),
               const SizedBox(width: 10),
               Expanded(
                 child: Text(label,
@@ -846,6 +760,8 @@ class _MedTabState extends State<_MedTab> {
     if (!mounted) return;
     setState(() => _loading = true);
     final meds = await ApiService.getMedications();
+    meds.sort((a, b) => (a['time']?.toString() ?? '').padLeft(5, '0')
+        .compareTo((b['time']?.toString() ?? '').padLeft(5, '0')));
     if (mounted) setState(() { _meds = meds; _loading = false; });
   }
 
@@ -983,13 +899,12 @@ class _MedTabState extends State<_MedTab> {
             children: [
               // 상단 바
               Container(
-                color: _surface,
-                padding: const EdgeInsets.fromLTRB(20, 14, 20, 16),
+                padding: const EdgeInsets.fromLTRB(24, 20, 20, 8),
                 child: Row(
                   children: [
-                    Text(s ? '오늘의 약 💊' : '복약 관리',
+                    Text(s ? '오늘의 약' : '복약 관리',
                         style: TextStyle(
-                            fontSize: s ? _sLg : 22,
+                            fontSize: s ? _sLg : 26,
                             fontWeight: FontWeight.w800,
                             letterSpacing: -0.4,
                             color: _text1)),
@@ -1020,18 +935,8 @@ class _MedTabState extends State<_MedTab> {
                   margin: const EdgeInsets.fromLTRB(16, 16, 16, 0),
                   padding: const EdgeInsets.all(22),
                   decoration: BoxDecoration(
-                    gradient: const LinearGradient(
-                      colors: [Color(0xFF4A90E2), Color(0xFF6B73FF)],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-                    borderRadius: BorderRadius.circular(20),
-                    boxShadow: [
-                      BoxShadow(
-                          color: const Color(0xFF4A90E2).withOpacity(0.3),
-                          blurRadius: 20,
-                          offset: const Offset(0, 8))
-                    ],
+                    color: _surface,
+                    borderRadius: BorderRadius.circular(24),
                   ),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -1040,13 +945,13 @@ class _MedTabState extends State<_MedTab> {
                           style: TextStyle(
                               fontSize: _fSm,
                               fontWeight: FontWeight.w600,
-                              color: Colors.white.withOpacity(0.9))),
+                              color: _text3)),
                       const SizedBox(height: 8),
                       Text('${(pct * 100).round()}%',
                           style: const TextStyle(
-                              fontSize: 48,
+                              fontSize: 44,
                               fontWeight: FontWeight.w800,
-                              color: Colors.white,
+                              color: _text1,
                               letterSpacing: -2,
                               height: 1)),
                       const SizedBox(height: 4),
@@ -1054,11 +959,11 @@ class _MedTabState extends State<_MedTab> {
                         total == 0
                             ? '등록된 복약이 없어요'
                             : (done == total
-                                ? '모든 약을 복용했어요 🎉'
+                                ? '모든 약을 복용했어요'
                                 : '$total개 중 $done개 완료 · ${total - done}개 남음'),
                         style: TextStyle(
                             fontSize: _fXs,
-                            color: Colors.white.withOpacity(0.9),
+                            color: _text3,
                             fontWeight: FontWeight.w600),
                       ),
                       const SizedBox(height: 12),
@@ -1067,9 +972,9 @@ class _MedTabState extends State<_MedTab> {
                         child: LinearProgressIndicator(
                           value: pct,
                           minHeight: 8,
-                          backgroundColor: Colors.white.withOpacity(0.25),
+                          backgroundColor: _line,
                           valueColor:
-                              const AlwaysStoppedAnimation(Colors.white),
+                              const AlwaysStoppedAnimation(_brand),
                         ),
                       ),
                     ],
@@ -1094,8 +999,7 @@ class _MedTabState extends State<_MedTab> {
                       padding: const EdgeInsets.all(40),
                       child: Column(
                         children: [
-                          const Text('💊',
-                              style: TextStyle(fontSize: 48)),
+                          const _TitleBadge(icon: Icons.medication_rounded, color: _brand, size: 72),
                           const SizedBox(height: 12),
                           const Text('등록된 복약이 없어요',
                               style: TextStyle(
@@ -1121,11 +1025,7 @@ class _MedTabState extends State<_MedTab> {
                     decoration: BoxDecoration(
                       color: _surface,
                       borderRadius: BorderRadius.circular(20),
-                      boxShadow: [
-                        BoxShadow(
-                            color: Colors.black.withOpacity(0.04),
-                            blurRadius: 8)
-                      ],
+                      
                     ),
                     child: Column(
                       children: _meds.asMap().entries.map((e) {
@@ -1164,7 +1064,7 @@ class _MedTabState extends State<_MedTab> {
           padding: const EdgeInsets.all(48),
           child: Column(
             children: [
-              const Text('💊', style: TextStyle(fontSize: 60)),
+              const _TitleBadge(icon: Icons.medication_rounded, color: _brand, size: 88),
               const SizedBox(height: 16),
               const Text('등록된 약이 없어요',
                   style: TextStyle(
@@ -1204,25 +1104,17 @@ class _MedTabState extends State<_MedTab> {
           margin: const EdgeInsets.fromLTRB(16, 0, 16, 14),
           padding: const EdgeInsets.all(22),
           decoration: BoxDecoration(
-            color: done ? _sucSoft : _surface,
+            color: _surface,
             borderRadius: BorderRadius.circular(22),
-            border: Border.all(
-                color: done ? _success.withOpacity(0.3) : _line, width: 1.5),
-            boxShadow: done
-                ? []
-                : [
-                    BoxShadow(
-                        color: Colors.black.withOpacity(0.05),
-                        blurRadius: 12,
-                        offset: const Offset(0, 4))
-                  ],
+            
+            
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Row(
                 children: [
-                  const Text('💊', style: TextStyle(fontSize: 32)),
+                  _TitleBadge(icon: Icons.medication_rounded, color: done ? _text3 : _brand, size: 52),
                   const SizedBox(width: 14),
                   Expanded(
                     child: Column(
@@ -1254,13 +1146,14 @@ class _MedTabState extends State<_MedTab> {
                 child: ElevatedButton(
                   onPressed: () => _toggle(med),
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: done ? _success : _brand,
-                    foregroundColor: Colors.white,
+                    backgroundColor: done ? _doneSoft : _brand,
+                    foregroundColor: done ? _done : Colors.white,
+                    elevation: 0,
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(16)),
                   ),
                   child: Text(
-                    done ? '✅  복용 완료' : '복용하기',
+                    done ? '✓  복용 완료' : '복용하기',
                     style: const TextStyle(
                         fontSize: _sSm, fontWeight: FontWeight.w800),
                   ),
@@ -1383,9 +1276,9 @@ class _MedItem extends StatelessWidget {
                 width: 32, height: 32,
                 decoration: BoxDecoration(
                   shape: BoxShape.circle,
-                  color: done ? _success : Colors.transparent,
+                  color: done ? _done : Colors.transparent,
                   border: Border.all(
-                      color: done ? _success : _line, width: 2),
+                      color: done ? _done : _line, width: 2),
                 ),
                 alignment: Alignment.center,
                 child: done
@@ -1403,14 +1296,15 @@ class _MedItem extends StatelessWidget {
   String _fmtTime(String t) {
     if (RegExp(r'^\d{1,2}:\d{2}').hasMatch(t)) {
       final p = t.split(':');
-      return '${int.parse(p[0])}:${p[1]}';
+      final h = int.parse(p[0]);
+      return '${h % 12 == 0 ? 12 : h % 12}:${p[1].substring(0, 2)}';
     }
     return t;
   }
 
   String _ampm(String t) {
     if (!RegExp(r'^\d{1,2}:\d{2}').hasMatch(t)) return '';
-    return (int.tryParse(t.split(':')[0]) ?? 0) < 12 ? 'AM' : 'PM';
+    return (int.tryParse(t.split(':')[0]) ?? 0) < 12 ? '오전' : '오후';
   }
 }
 
@@ -1602,13 +1496,12 @@ class _SchedTabState extends State<_SchedTab> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
-                color: _surface,
-                padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+                padding: const EdgeInsets.fromLTRB(24, 20, 20, 8),
                 child: Row(
                   children: [
                     const Text('일정',
                         style: TextStyle(
-                            fontSize: 22,
+                            fontSize: 26,
                             fontWeight: FontWeight.w800,
                             letterSpacing: -0.4,
                             color: _text1)),
@@ -1629,8 +1522,12 @@ class _SchedTabState extends State<_SchedTab> {
                 ),
               ),
               Container(
-                color: _surface,
-                padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+                margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                padding: const EdgeInsets.fromLTRB(16, 18, 16, 14),
+                decoration: BoxDecoration(
+                  color: _surface,
+                  borderRadius: BorderRadius.circular(24),
+                ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -1669,7 +1566,7 @@ class _SchedTabState extends State<_SchedTab> {
                                 width: 36, height: 36,
                                 decoration: BoxDecoration(
                                   color: isSelected
-                                      ? _text1
+                                      ? _brand
                                       : Colors.transparent,
                                   shape: BoxShape.circle,
                                 ),
@@ -1702,7 +1599,7 @@ class _SchedTabState extends State<_SchedTab> {
                 ),
               ),
               Padding(
-                padding: const EdgeInsets.fromLTRB(20, 14, 20, 10),
+                padding: const EdgeInsets.fromLTRB(28, 20, 20, 10),
                 child: Text(
                   '${_selected.day == now.day ? '오늘' : '${_selected.month}/${_selected.day}'} 일정 ${dayList.length}건',
                   style: const TextStyle(
@@ -1722,10 +1619,9 @@ class _SchedTabState extends State<_SchedTab> {
                     padding: const EdgeInsets.all(40),
                     child: Column(
                       children: [
-                        const Text('📅',
-                            style: TextStyle(fontSize: 48)),
+                        const _TitleBadge(icon: Icons.calendar_month_rounded, color: _sky, size: 72),
                         const SizedBox(height: 12),
-                        const Text('일정이 없어요 😊',
+                        const Text('일정이 없어요',
                             style: TextStyle(
                                 fontSize: 16, color: _text3)),
                         const SizedBox(height: 12),
@@ -1770,11 +1666,10 @@ class _SchedTabState extends State<_SchedTab> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Container(
-                color: _surface,
-                padding: const EdgeInsets.fromLTRB(20, 14, 20, 16),
+                padding: const EdgeInsets.fromLTRB(24, 20, 20, 8),
                 child: Row(
                   children: [
-                    Text('오늘 일정 📅',
+                    Text('오늘 일정',
                         style: const TextStyle(
                             fontSize: _sLg,
                             fontWeight: FontWeight.w800,
@@ -1823,10 +1718,9 @@ class _SchedTabState extends State<_SchedTab> {
                     padding: const EdgeInsets.all(48),
                     child: Column(
                       children: [
-                        const Text('📅',
-                            style: TextStyle(fontSize: 60)),
+                        const _TitleBadge(icon: Icons.calendar_month_rounded, color: _sky, size: 88),
                         const SizedBox(height: 16),
-                        const Text('오늘 일정이 없어요 😊',
+                        const Text('오늘 일정이 없어요',
                             style: TextStyle(
                                 fontSize: _sSm,
                                 color: _text3,
@@ -1861,13 +1755,9 @@ class _SchedTabState extends State<_SchedTab> {
                     margin: const EdgeInsets.fromLTRB(16, 0, 16, 14),
                     padding: const EdgeInsets.all(22),
                     decoration: BoxDecoration(
-                      color: isDone ? _sucSoft : _surface,
+                      color: _surface,
                       borderRadius: BorderRadius.circular(22),
-                      border: Border.all(
-                          color: isDone
-                              ? _success.withOpacity(0.3)
-                              : _line,
-                          width: 1.5),
+                      
                       boxShadow: isDone
                           ? []
                           : [
@@ -1902,14 +1792,15 @@ class _SchedTabState extends State<_SchedTab> {
                           child: ElevatedButton(
                             onPressed: () => _toggleComplete(sc),
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: isDone ? _success : _brand,
-                              foregroundColor: Colors.white,
+                              backgroundColor: isDone ? _doneSoft : _brand,
+                              foregroundColor: isDone ? _done : Colors.white,
+                              elevation: 0,
                               shape: RoundedRectangleBorder(
                                   borderRadius:
                                       BorderRadius.circular(16)),
                             ),
                             child: Text(
-                              isDone ? '✅  완료됨' : '완료하기',
+                              isDone ? '✓  완료됨' : '완료하기',
                               style: const TextStyle(
                                   fontSize: _sSm,
                                   fontWeight: FontWeight.w800),
@@ -1941,7 +1832,7 @@ class _SchedTabState extends State<_SchedTab> {
 class _SchedItem extends StatelessWidget {
   final Map data;
   final VoidCallback onComplete, onDelete;
-  static const _colors = [_brand, _warning, _success, Color(0xFF9B59B6)];
+  static const _colors = [_brand, _sky, _done, Color(0xFF4F46E5)];
 
   const _SchedItem(
       {required this.data, required this.onComplete, required this.onDelete});
@@ -2045,9 +1936,9 @@ class _SchedItem extends StatelessWidget {
                   width: 28, height: 28,
                   decoration: BoxDecoration(
                     shape: BoxShape.circle,
-                    color: isDone ? _success : Colors.transparent,
+                    color: isDone ? _done : Colors.transparent,
                     border: Border.all(
-                        color: isDone ? _success : _line, width: 2),
+                        color: isDone ? _done : _line, width: 2),
                   ),
                   alignment: Alignment.center,
                   child: isDone
@@ -2067,8 +1958,11 @@ class _SchedItem extends StatelessWidget {
 }
 
 // ════════════════════════════════════════════════════════════
-//  기록 TAB
+//  기록 TAB — 캐릭터 채팅방 스타일
+//  어르신(오른쪽)과 오아시스(왼쪽)가 나눈 대화를 메신저처럼 보여준다.
 // ════════════════════════════════════════════════════════════
+const _oasisAvatar = 'assets/icon/app_icon.png';
+
 class _LogTab extends StatefulWidget {
   final bool seniorView;
   const _LogTab({required this.seniorView});
@@ -2078,166 +1972,157 @@ class _LogTab extends StatefulWidget {
 }
 
 class _LogTabState extends State<_LogTab> {
-  List<Map>  _chats  = [];
-  bool       _loading = true;
-  bool       _showSearch = false;
-  String     _query = '';
-  final      _searchCtrl = TextEditingController();
+  List<Map> _chats   = [];
+  bool      _loading = true;
+  String    _query   = '';
+  final     _searchCtrl = TextEditingController();
+  final     _scrollCtrl = ScrollController();
+  Timer?    _timer;
 
   @override
-  void initState() { super.initState(); _load(); }
+  void initState() {
+    super.initState();
+    _load();
+    // 5초마다 새 대화 확인
+    _timer = Timer.periodic(const Duration(seconds: 5), (_) => _loadSilently());
+  }
 
   @override
-  void dispose() { _searchCtrl.dispose(); super.dispose(); }
+  void dispose() {
+    _searchCtrl.dispose();
+    _scrollCtrl.dispose();
+    _timer?.cancel();
+    super.dispose();
+  }
 
   Future<void> _load() async {
     setState(() => _loading = true);
     final chats = await ApiService.getChatLogs();
-    if (mounted) setState(() { _chats = chats; _loading = false; });
+    if (mounted) {
+      setState(() { _chats = chats; _loading = false; });
+      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+    }
+  }
+
+  Future<void> _loadSilently() async {
+    final chats = await ApiService.getChatLogs();
+    if (!mounted) return;
+    if (chats.length != _chats.length) {
+      setState(() => _chats = chats);
+      WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+    }
+  }
+
+  void _scrollToBottom() {
+    if (_scrollCtrl.hasClients) {
+      _scrollCtrl.animateTo(
+        _scrollCtrl.position.maxScrollExtent,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
+    }
   }
 
   List<Map> get _filteredChats {
     if (_query.isEmpty) return _chats;
     return _chats.where((c) =>
-        (c['user'] as String? ?? '').toLowerCase().contains(_query) ||
-        (c['bot'] as String? ?? '').toLowerCase().contains(_query)).toList();
+        (c['content'] as String? ?? '').toLowerCase().contains(_query)).toList();
+  }
+
+  int get _todayCount {
+    final now = DateTime.now();
+    return _chats.where((c) {
+      final dt = DateTime.tryParse((c['time'] as String? ?? '').replaceAll(' ', 'T'));
+      return c['role'] == 'user' && dt != null &&
+          dt.year == now.year && dt.month == now.month && dt.day == now.day;
+    }).length;
   }
 
   @override
   Widget build(BuildContext context) {
-    return SafeArea(
-      child: Column(
-        children: [
-          Container(
-            color: _surface,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 14, 16, 12),
-                  child: Row(
-                    children: [
-                      const Text('대화 기록',
-                          style: TextStyle(
-                              fontSize: 22,
-                              fontWeight: FontWeight.w800,
-                              color: _text1)),
-                      const Spacer(),
-                      GestureDetector(
-                        onTap: () {
-                          setState(() {
-                            _showSearch = !_showSearch;
-                            if (!_showSearch) {
-                              _query = '';
-                              _searchCtrl.clear();
-                            }
-                          });
-                        },
-                        child: Container(
-                          width: 40, height: 40,
-                          child: Center(
-                            child: Icon(Icons.search_rounded,
-                                color: _showSearch ? _brand : _text3,
-                                size: 24),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-                // 검색 바
-                if (_showSearch)
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                    child: TextField(
-                      controller: _searchCtrl,
-                      autofocus: true,
-                      onChanged: (v) =>
-                          setState(() => _query = v.toLowerCase()),
-                      style: const TextStyle(fontSize: 15),
-                      decoration: InputDecoration(
-                        hintText: '검색어를 입력하세요',
-                        prefixIcon: const Icon(Icons.search_rounded,
-                            color: _text3, size: 18),
-                        suffixIcon: _query.isNotEmpty
-                            ? GestureDetector(
-                                onTap: () => setState(() {
-                                  _query = '';
-                                  _searchCtrl.clear();
-                                }),
-                                child: const Icon(Icons.clear_rounded,
-                                    color: _text3, size: 18),
-                              )
-                            : null,
-                        filled: true,
-                        fillColor: _bg,
-                        border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide.none),
-                        contentPadding: const EdgeInsets.symmetric(
-                            horizontal: 12, vertical: 10),
-                      ),
-                    ),
-                  ),
-              ],
+    final s = widget.seniorView;
+    return Container(
+      color: _bg,
+      child: SafeArea(
+        bottom: false,
+        child: Column(
+          children: [
+            _LogHeader(onRefresh: _load, senior: s),
+            // 안내 배너
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 9),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.75),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Text(
+                '오아시스의 답변은 AI가 생성한 내용이에요',
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: s ? 15 : 12, color: _text3, fontWeight: FontWeight.w500),
+              ),
             ),
-          ),
-          Expanded(
-            child: _loading
-                ? const Center(
-                    child: CircularProgressIndicator(color: _brand))
-                : RefreshIndicator(
-                    onRefresh: _load,
-                    color: _brand,
-                    child: _buildChatList(),
-                  ),
-          ),
-        ],
+            Expanded(
+              child: _loading
+                  ? const Center(child: CircularProgressIndicator(color: _brand))
+                  : RefreshIndicator(
+                      onRefresh: _load,
+                      color: _brand,
+                      displacement: 20,
+                      child: _buildChatList(s),
+                    ),
+            ),
+            _LogSearchBar(
+              controller: _searchCtrl,
+              senior: s,
+              onChanged: (v) => setState(() => _query = v.trim().toLowerCase()),
+              onClear: () => setState(() { _query = ''; _searchCtrl.clear(); }),
+            ),
+          ],
+        ),
       ),
     );
   }
 
-  Widget _buildChatList() {
+  Widget _buildChatList(bool s) {
     final list = _filteredChats;
+    final children = <Widget>[];
+
+    // 검색 중이 아닐 때만 캐릭터 프로필 카드
+    if (_query.isEmpty) {
+      children.add(_OasisProfileCard(
+          todayCount: _todayCount, totalCount: _chats.length, senior: s));
+    }
+
     if (list.isEmpty) {
-      return ListView(children: const [
-        SizedBox(height: 80),
-        Center(
-            child: Text('대화 기록이 없어요',
-                style: TextStyle(fontSize: 16, color: _text3))),
-      ]);
+      children.add(Padding(
+        padding: const EdgeInsets.only(top: 28),
+        child: Text(
+          _query.isEmpty
+              ? '아직 대화가 없어요.\n어르신이 오아시스에게 말을 걸면 여기에 기록돼요.'
+              : '"$_query" 에 대한 대화가 없어요',
+          textAlign: TextAlign.center,
+          style: TextStyle(fontSize: s ? 17 : 14, color: _text3, height: 1.6),
+        ),
+      ));
+    } else {
+      String? lastDate;
+      for (final c in list) {
+        final key = _dateKey(c['time'] as String? ?? '');
+        if (key != lastDate) {
+          children.add(_DateDivider(label: key));
+          lastDate = key;
+        }
+        children.add(_ChatBubble(data: c, senior: s));
+      }
     }
-    final Map<String, List<Map>> grouped = {};
-    for (final c in list) {
-      final key = _dateKey(c['time'] as String? ?? '');
-      grouped.putIfAbsent(key, () => []).add(c);
-    }
+
     return ListView(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
-      children: grouped.entries
-          .map((e) => Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Padding(
-                      padding: const EdgeInsets.only(bottom: 12, top: 4),
-                      child: Center(
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-                          decoration: BoxDecoration(
-                            color: _line,
-                            borderRadius: BorderRadius.circular(99),
-                          ),
-                          child: Text(e.key,
-                              style: const TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w600,
-                                  color: _text3)),
-                        ),
-                      )),
-                  ...e.value.map((c) => _ChatBubble(data: c)),
-                ],
-              ))
-          .toList(),
+      controller: _scrollCtrl,
+      physics: const AlwaysScrollableScrollPhysics(),
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 20),
+      children: children,
     );
   }
 
@@ -2246,114 +2131,304 @@ class _LogTabState extends State<_LogTab> {
       final dt  = DateTime.parse(t.replaceAll(' ', 'T'));
       final now = DateTime.now();
       if (dt.year == now.year && dt.month == now.month && dt.day == now.day)
-        return '오늘 · ${now.month}월 ${now.day}일';
+        return '오늘 · ${dt.month}월 ${dt.day}일';
       final yd = now.subtract(const Duration(days: 1));
       if (dt.year == yd.year && dt.month == yd.month && dt.day == yd.day)
         return '어제 · ${dt.month}월 ${dt.day}일';
       return '${dt.month}월 ${dt.day}일';
-    } catch (_) { return '이전'; }
+    } catch (_) { return '이전 대화'; }
   }
 }
 
-class _ChatBubble extends StatelessWidget {
-  final Map data;
-  const _ChatBubble({required this.data});
+// ── 오아시스 원형 아바타
+class _OasisAvatar extends StatelessWidget {
+  final double size;
+  final double border;
+  const _OasisAvatar({this.size = 36, this.border = 0});
 
   @override
   Widget build(BuildContext context) {
-    final user    = data['user'] as String? ?? '';
-    final bot     = data['bot'] as String? ?? '';
-    final timeStr = _fmtTime(data['time'] as String? ?? '');
-    final maxW    = MediaQuery.of(context).size.width * 0.72;
+    return Container(
+      width: size, height: size,
+      padding: EdgeInsets.all(border),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        shape: BoxShape.circle,
+        boxShadow: [
+          BoxShadow(color: _brand.withOpacity(0.15), blurRadius: 8, offset: const Offset(0, 2)),
+        ],
+      ),
+      child: ClipOval(child: Image.asset(_oasisAvatar, fit: BoxFit.cover)),
+    );
+  }
+}
 
+// ── 상단 헤더: 아바타 + 이름 + 새로고침
+class _LogHeader extends StatelessWidget {
+  final VoidCallback onRefresh;
+  final bool senior;
+  const _LogHeader({required this.onRefresh, required this.senior});
+
+  @override
+  Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(bottom: 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
+      padding: const EdgeInsets.fromLTRB(16, 10, 8, 8),
+      child: Row(
         children: [
-          // ── 사용자 발화 (오른쪽) ──
-          if (user.isNotEmpty) ...[
-            Align(
-              alignment: Alignment.centerRight,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  Container(
-                    constraints: BoxConstraints(maxWidth: maxW),
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                    decoration: const BoxDecoration(
-                      color: _brand,
-                      borderRadius: BorderRadius.only(
-                        topLeft: Radius.circular(16),
-                        topRight: Radius.circular(16),
-                        bottomLeft: Radius.circular(16),
-                        bottomRight: Radius.circular(4),
-                      ),
-                    ),
-                    child: Text(user,
-                        style: const TextStyle(
-                            fontSize: 15, color: Colors.white, height: 1.4)),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(timeStr,
-                      style: const TextStyle(fontSize: 11, color: _text3)),
-                ],
-              ),
-            ),
-            const SizedBox(height: 8),
-          ],
-          // ── AI 응답 (왼쪽) ──
-          if (bot.isNotEmpty)
-            Row(
+          _OasisAvatar(size: senior ? 48 : 42, border: 2),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Container(
-                  width: 30, height: 30,
-                  decoration: BoxDecoration(
-                      color: _brandSoft,
-                      borderRadius: BorderRadius.circular(9)),
-                  alignment: Alignment.center,
-                  child: const Text('🤖', style: TextStyle(fontSize: 15)),
-                ),
-                const SizedBox(width: 8),
-                Flexible(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text('오아시스',
-                          style: TextStyle(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                              color: _brand)),
-                      const SizedBox(height: 4),
-                      Container(
-                        constraints: BoxConstraints(maxWidth: maxW),
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 14, vertical: 10),
-                        decoration: BoxDecoration(
-                          color: _surface,
-                          borderRadius: const BorderRadius.only(
-                            topLeft: Radius.circular(4),
-                            topRight: Radius.circular(16),
-                            bottomLeft: Radius.circular(16),
-                            bottomRight: Radius.circular(16),
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                                color: Colors.black.withOpacity(0.05),
-                                blurRadius: 8,
-                                offset: const Offset(0, 2))
-                          ],
-                        ),
-                        child: Text(bot,
-                            style: const TextStyle(
-                                fontSize: 15, color: _text2, height: 1.45)),
-                      ),
-                    ],
-                  ),
+                Text('오아시스',
+                    style: TextStyle(
+                        fontSize: senior ? 22 : 18,
+                        fontWeight: FontWeight.w800,
+                        color: _text1)),
+                const SizedBox(height: 2),
+                Row(
+                  children: [
+                    Container(
+                      width: 7, height: 7,
+                      decoration: const BoxDecoration(color: _brand, shape: BoxShape.circle),
+                    ),
+                    const SizedBox(width: 6),
+                    Text('어르신의 AI 말벗 · 대화 기록',
+                        style: TextStyle(fontSize: senior ? 15 : 12, color: _text3, fontWeight: FontWeight.w500)),
+                  ],
                 ),
               ],
             ),
+          ),
+          IconButton(
+            onPressed: onRefresh,
+            icon: const Icon(Icons.refresh_rounded, color: _text2, size: 24),
+            tooltip: '새로고침',
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── 대화방 맨 위 캐릭터 프로필 카드
+class _OasisProfileCard extends StatelessWidget {
+  final int todayCount, totalCount;
+  final bool senior;
+  const _OasisProfileCard({required this.todayCount, required this.totalCount, required this.senior});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(top: 4, bottom: 8),
+      padding: const EdgeInsets.fromLTRB(20, 26, 20, 20),
+      decoration: BoxDecoration(
+        gradient: _heroGradient,
+        borderRadius: BorderRadius.circular(24),
+        boxShadow: [
+          BoxShadow(color: _brand.withOpacity(0.22), blurRadius: 24, offset: const Offset(0, 10)),
+        ],
+      ),
+      child: Column(
+        children: [
+          _OasisAvatar(size: senior ? 112 : 96, border: 4),
+          const SizedBox(height: 14),
+          Text('오아시스',
+              style: TextStyle(
+                  fontSize: senior ? 26 : 22,
+                  fontWeight: FontWeight.w800,
+                  color: Colors.white)),
+          const SizedBox(height: 6),
+          Text('오늘도 어르신 곁에서 이야기를 나눠요',
+              style: TextStyle(
+                  fontSize: senior ? 17 : 14,
+                  color: Colors.white.withOpacity(0.85),
+                  fontWeight: FontWeight.w500)),
+          const SizedBox(height: 18),
+          Row(
+            children: [
+              _ProfileStat(label: '오늘 대화', value: '$todayCount회', senior: senior),
+              const SizedBox(width: 10),
+              _ProfileStat(label: '전체 기록', value: '$totalCount개', senior: senior),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ProfileStat extends StatelessWidget {
+  final String label, value;
+  final bool senior;
+  const _ProfileStat({required this.label, required this.value, required this.senior});
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 12),
+        decoration: BoxDecoration(
+          color: Colors.white.withOpacity(0.16),
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Column(
+          children: [
+            Text(value,
+                style: TextStyle(
+                    fontSize: senior ? 22 : 18,
+                    fontWeight: FontWeight.w800,
+                    color: Colors.white)),
+            const SizedBox(height: 2),
+            Text(label,
+                style: TextStyle(
+                    fontSize: senior ? 14 : 12,
+                    color: Colors.white.withOpacity(0.8))),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── 날짜 구분선
+class _DateDivider extends StatelessWidget {
+  final String label;
+  const _DateDivider({required this.label});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 14),
+      child: Center(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+          decoration: BoxDecoration(
+            color: _text1.withOpacity(0.08),
+            borderRadius: BorderRadius.circular(99),
+          ),
+          child: Text(label,
+              style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: _text2)),
+        ),
+      ),
+    );
+  }
+}
+
+// ── 말풍선
+class _ChatBubble extends StatelessWidget {
+  final Map data;
+  final bool senior;
+  const _ChatBubble({required this.data, this.senior = false});
+
+  @override
+  Widget build(BuildContext context) {
+    final role    = data['role'] as String? ?? '';
+    final content = data['content'] as String? ?? '';
+    final type    = data['type'] as String? ?? '';
+    final timeStr = _fmtTime(data['time'] as String? ?? '');
+    final maxW    = MediaQuery.of(context).size.width * 0.66;
+    final isUser  = role == 'user';
+    final fs      = senior ? 19.0 : 15.0;
+
+    final timeText = Text(timeStr,
+        style: TextStyle(fontSize: senior ? 13 : 11, color: _text3));
+
+    if (isUser) {
+      // ── 어르신 발화 (오른쪽, 블루)
+      return Padding(
+        padding: const EdgeInsets.only(bottom: 14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            Padding(
+              padding: const EdgeInsets.only(right: 4, bottom: 4),
+              child: Text('어르신',
+                  style: TextStyle(fontSize: senior ? 14 : 12, color: _text3, fontWeight: FontWeight.w600)),
+            ),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                timeText,
+                const SizedBox(width: 6),
+                Container(
+                  constraints: BoxConstraints(maxWidth: maxW),
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  decoration: const BoxDecoration(
+                    color: _brand,
+                    borderRadius: BorderRadius.only(
+                      topLeft: Radius.circular(20),
+                      topRight: Radius.circular(20),
+                      bottomLeft: Radius.circular(20),
+                      bottomRight: Radius.circular(6),
+                    ),
+                  ),
+                  child: Text(content,
+                      style: TextStyle(fontSize: fs, color: Colors.white, height: 1.45)),
+                ),
+              ],
+            ),
+            if (type.isNotEmpty && type != '생활정보') ...[
+              const SizedBox(height: 6),
+              _TypeNote(type: type, senior: senior),
+            ],
+          ],
+        ),
+      );
+    }
+
+    // ── 오아시스 답변 (왼쪽, 흰 말풍선 + 아바타)
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 14),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _OasisAvatar(size: senior ? 44 : 38, border: 1.5),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(left: 4, bottom: 4),
+                  child: Text('오아시스',
+                      style: TextStyle(fontSize: senior ? 14 : 12, color: _text3, fontWeight: FontWeight.w600)),
+                ),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Flexible(
+                      child: Container(
+                        constraints: BoxConstraints(maxWidth: maxW),
+                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                        decoration: BoxDecoration(
+                          color: _surface,
+                          borderRadius: const BorderRadius.only(
+                            topLeft: Radius.circular(6),
+                            topRight: Radius.circular(20),
+                            bottomLeft: Radius.circular(20),
+                            bottomRight: Radius.circular(20),
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                                color: _text1.withOpacity(0.06),
+                                blurRadius: 10,
+                                offset: const Offset(0, 2)),
+                          ],
+                        ),
+                        child: Text(content,
+                            style: TextStyle(fontSize: fs, color: _text1, height: 1.45)),
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    timeText,
+                  ],
+                ),
+              ],
+            ),
+          ),
         ],
       ),
     );
@@ -2373,6 +2448,110 @@ class _ChatBubble extends StatelessWidget {
   }
 }
 
+// ── AI가 분류한 대화 주제 표시 (서술형 말풍선)
+class _TypeNote extends StatelessWidget {
+  final String type;
+  final bool senior;
+  const _TypeNote({required this.type, required this.senior});
+
+  @override
+  Widget build(BuildContext context) {
+    final isEmergency = type == '긴급';
+    final color = isEmergency ? _danger : (type == '일정' ? _sky : _brand);
+    final icon = switch (type) {
+      '복약' => Icons.medication_rounded,
+      '일정' => Icons.calendar_month_rounded,
+      '긴급' => Icons.warning_amber_rounded,
+      _      => Icons.label_rounded,
+    };
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: isEmergency ? _dangerSoft : Colors.white.withOpacity(0.8),
+        borderRadius: BorderRadius.circular(99),
+        border: Border.all(color: color.withOpacity(0.2)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: senior ? 16 : 13, color: color),
+          const SizedBox(width: 4),
+          Text(isEmergency ? '긴급 대화로 분류됐어요' : '$type 관련 대화',
+              style: TextStyle(fontSize: senior ? 14 : 11, fontWeight: FontWeight.w700, color: color)),
+        ],
+      ),
+    );
+  }
+}
+
+// ── 하단 검색창 (메신저 입력창 모양)
+class _LogSearchBar extends StatelessWidget {
+  final TextEditingController controller;
+  final bool senior;
+  final ValueChanged<String> onChanged;
+  final VoidCallback onClear;
+  const _LogSearchBar({
+    required this.controller, required this.senior,
+    required this.onChanged, required this.onClear,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: _surface,
+        border: Border(top: BorderSide(color: _line)),
+      ),
+      padding: const EdgeInsets.fromLTRB(16, 10, 16, 10),
+      child: Row(
+        children: [
+          Expanded(
+            child: TextField(
+              controller: controller,
+              onChanged: onChanged,
+              textInputAction: TextInputAction.search,
+              style: TextStyle(fontSize: senior ? 18 : 15, color: _text1),
+              decoration: InputDecoration(
+                hintText: '대화 내용 검색',
+                hintStyle: TextStyle(color: _text3, fontSize: senior ? 18 : 15),
+                prefixIcon: const Icon(Icons.search_rounded, color: _text3, size: 22),
+                filled: true,
+                fillColor: _bg,
+                isDense: true,
+                contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+                border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(24),
+                    borderSide: BorderSide.none),
+              ),
+            ),
+          ),
+          const SizedBox(width: 6),
+          ValueListenableBuilder<TextEditingValue>(
+            valueListenable: controller,
+            builder: (_, v, __) {
+              final active = v.text.isNotEmpty;
+              if (!active) return const SizedBox.shrink();
+              return GestureDetector(
+                onTap: active ? onClear : null,
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 150),
+                  width: 44, height: 44,
+                  decoration: BoxDecoration(
+                    color: active ? _brand : _bg,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(active ? Icons.close_rounded : Icons.search_rounded,
+                      color: active ? Colors.white : _text3, size: 22),
+                ),
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 // ════════════════════════════════════════════════════════════
 //  홈캠 TAB
 // ════════════════════════════════════════════════════════════
@@ -2385,13 +2564,12 @@ class _CamTab extends StatelessWidget {
       child: Column(
         children: [
           Container(
-            color: _surface,
-            padding: const EdgeInsets.fromLTRB(20, 14, 20, 16),
+            padding: const EdgeInsets.fromLTRB(24, 20, 20, 8),
             child: const Row(
               children: [
                 Text('홈캠',
                     style: TextStyle(
-                        fontSize: 22,
+                        fontSize: 26,
                         fontWeight: FontWeight.w800,
                         letterSpacing: -0.4,
                         color: _text1)),
@@ -2423,19 +2601,18 @@ class _SettingsTab extends StatelessWidget {
           children: [
             // 상단 바
             Container(
-              color: _surface,
-              padding: const EdgeInsets.fromLTRB(20, 14, 20, 16),
+              padding: const EdgeInsets.fromLTRB(24, 20, 20, 8),
               child: const Row(
                 children: [
                   Text('설정',
                       style: TextStyle(
-                          fontSize: 22,
+                          fontSize: 26,
                           fontWeight: FontWeight.w800,
                           color: _text1)),
                 ],
               ),
             ),
-            const SizedBox(height: 16),
+            const SizedBox(height: 4),
 
             // 내 정보
             _SettingSection(title: '내 정보', children: [
@@ -2447,7 +2624,7 @@ class _SettingsTab extends StatelessWidget {
                 sub: AppState.username ?? '',
               ),
             ]),
-            const SizedBox(height: 16),
+            const SizedBox(height: 4),
 
             // 화면 설정
             _SettingSection(title: '화면 설정', children: [
@@ -2480,28 +2657,29 @@ class _SettingsTab extends StatelessWidget {
                         ],
                       ),
                     ),
-                    Switch(
+                    Switch.adaptive(
                       value: seniorView,
                       onChanged: (_) => onToggleView(),
                       activeColor: _brand,
+                      activeTrackColor: _brand,
                     ),
                   ],
                 ),
               ),
             ]),
-            const SizedBox(height: 16),
+            const SizedBox(height: 4),
 
             // 앱 정보
             _SettingSection(title: '앱 정보', children: [
               _SettingRow(
                 icon: Icons.info_outline_rounded,
-                iconBg: const Color(0xFFF0F4FF),
-                iconColor: const Color(0xFF6B7AFF),
+                iconBg: _brandSoft,
+                iconColor: _brand,
                 label: 'OASIS',
                 sub: '어르신 안심 케어 서비스  v1.0.0',
               ),
             ]),
-            const SizedBox(height: 16),
+            const SizedBox(height: 4),
 
             // 로그아웃
             _SettingSection(title: '계정', children: [
@@ -2557,7 +2735,7 @@ class _SettingSection extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+          padding: const EdgeInsets.fromLTRB(28, 4, 20, 10),
           child: Text(title,
               style: const TextStyle(
                   fontSize: 13,
@@ -2565,7 +2743,12 @@ class _SettingSection extends StatelessWidget {
                   color: _text3)),
         ),
         Container(
-          color: _surface,
+          margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+          clipBehavior: Clip.antiAlias,
+          decoration: BoxDecoration(
+            color: _surface,
+            borderRadius: BorderRadius.circular(24),
+          ),
           child: Column(children: children),
         ),
       ],
@@ -2664,8 +2847,8 @@ class _SensorMiniCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = isAlert ? _danger : _success;
-    final bg    = isAlert ? _dangerSoft : _sucSoft;
+    final color = isAlert ? _danger : _brand;
+    final bg    = isAlert ? _dangerSoft : _brandSoft;
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
       decoration: BoxDecoration(

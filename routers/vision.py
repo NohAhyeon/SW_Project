@@ -4,6 +4,7 @@ import requests
 import logging
 import logging.handlers
 import threading
+import os
 from datetime import datetime
 from dataclasses import dataclass
 from typing import Optional
@@ -39,7 +40,7 @@ class DetectionConfig:
     motion_threshold: int = 500
     inactive_alert_seconds: int = 10      # 테스트: 10초 / 실사용: 1800 (30분)
     inactive_warning_seconds: int = 5     # 테스트: 5초  / 실사용: 600  (10분)
-    api_url: str = "http://172.27.177.208:8000" 
+    api_url: str = os.getenv("API_BASE_URL", "http://localhost:8000")
     camera_index: int = 0
     blur_kernel: int = 5
     min_contour_area: int = 300
@@ -277,7 +278,7 @@ if __name__ == "__main__":
         motion_threshold=500,
         inactive_alert_seconds=10,
         inactive_warning_seconds=5,
-        api_url="http://172.27.177.208:8000",
+        api_url=os.getenv("API_BASE_URL", "http://localhost:8000"),
         camera_index=4,
         stream_port=8080,
     )

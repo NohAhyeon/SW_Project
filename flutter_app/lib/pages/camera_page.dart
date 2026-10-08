@@ -1,9 +1,10 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import '../data/api_service.dart';
 
-const String _streamUrl = 'http://localhost:8000/video';
+final String _streamUrl = dotenv.env['CAMERA_STREAM_URL'] ?? 'http://localhost:5000/';
 const int _refreshInterval = 30;
 
 class CameraPage extends StatefulWidget {
@@ -71,19 +72,35 @@ class _CameraPageState extends State<CameraPage>
   void _initCamera() {
     _webViewController = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
+      ..setBackgroundColor(const Color(0xFF191F28))
+      ..enableZoom(false)
       ..setNavigationDelegate(NavigationDelegate(
+        onPageStarted: (_) {
+          if (mounted) setState(() => _isConnected = true);
+          // style 태그를 head에 주입 → 이미지 생성 즉시 적용
+          _webViewController.runJavaScript('''
+            (function() {
+              var s = document.createElement('style');
+              s.textContent = 'html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#000;} img{width:100%!important;height:100%!important;object-fit:fill!important;display:block!important;}';
+              if (document.head) document.head.appendChild(s);
+              else document.addEventListener("DOMContentLoaded", function(){ document.head.appendChild(s); });
+            })();
+          ''');
+        },
         onPageFinished: (_) async {
-          // JSON 에러 페이지인지 확인 ({"detail":"Not Found"} 등)
+          // 페이지가 완전히 로드됐으면 JSON 에러인지 확인
           try {
             final result = await _webViewController.runJavaScriptReturningResult(
-              "document.body ? document.body.innerText.trim().startsWith('{') : true",
+              "document.body ? document.body.innerText.trim().startsWith('{') : false",
             );
             if (mounted) setState(() => _isConnected = result.toString() != 'true');
           } catch (_) {
-            if (mounted) setState(() => _isConnected = false);
+            // MJPEG 스트리밍은 페이지 완료 없이 계속 전송 → 연결 유지
           }
         },
-        onWebResourceError: (_) => setState(() => _isConnected = false),
+        onWebResourceError: (_) {
+          if (mounted) setState(() => _isConnected = false);
+        },
       ))
       ..loadRequest(Uri.parse(_streamUrl));
   }
@@ -123,8 +140,9 @@ class _CameraPageState extends State<CameraPage>
 
     if (!mounted) return;
     final hadCritical = _hasCriticalAlert;
+    const sensorTypes = {'비활동', '가스', '낙상', '긴급'};
     setState(() {
-      _allAlerts = data;
+      _allAlerts = data.where((a) => sensorTypes.contains(a['type'])).toList();
       _isLoading = false;
     });
 
@@ -160,7 +178,7 @@ class _CameraPageState extends State<CameraPage>
   @override
   Widget build(BuildContext context) {
     return RefreshIndicator(
-      color: const Color(0xFF6366F1),
+      color: const Color(0xFF2F6FEB),
       onRefresh: _loadAlerts,
       child: SingleChildScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
@@ -168,7 +186,13 @@ class _CameraPageState extends State<CameraPage>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _buildEmergencyBanner(),
-            _buildCameraView(),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(24),
+                child: _buildCameraView(),
+              ),
+            ),
             _buildStatsRow(),
             const SizedBox(height: 20),
             Padding(
@@ -201,7 +225,7 @@ class _CameraPageState extends State<CameraPage>
                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                 decoration: const BoxDecoration(
                   gradient: LinearGradient(
-                    colors: [Color(0xFFDC2626), Color(0xFFEF4444)],
+                    colors: [Color(0xFFDC2626), Color(0xFFDC2626)],
                   ),
                 ),
                 child: Row(
@@ -261,43 +285,52 @@ class _CameraPageState extends State<CameraPage>
 
   // ── 카메라 뷰 ────────────────────────────────────────────────────────────
   Widget _buildCameraView() {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final w = constraints.maxWidth;
+        final h = w * 2 / 3; // 3:2 비율
     return Stack(
       children: [
         // WebView는 항상 렌더링 (연결 시 표시)
-        Container(
-          width: double.infinity,
-          height: 260,
-          color: const Color(0xFF0F172A),
-          child: WebViewWidget(controller: _webViewController),
+        SizedBox(
+          width: w,
+          height: h,
+          child: Container(
+            color: const Color(0xFF191F28),
+            child: WebViewWidget(controller: _webViewController),
+          ),
         ),
         // Not Found / 미연결 시 네이비 블루 오버레이
         if (!_isConnected)
-          Container(
-            width: double.infinity,
-            height: 260,
-            decoration: const BoxDecoration(
-              gradient: LinearGradient(
-                colors: [Color(0xFF0A1628), Color(0xFF0D2240)],
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
+          SizedBox(
+            width: w,
+            height: h,
+            child: Container(
+              width: double.infinity,
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [Color(0xFF0A1628), Color(0xFF0D2240)],
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                ),
               ),
-            ),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Icon(Icons.videocam_off_rounded,
-                    color: Colors.white.withOpacity(0.28), size: 52),
-                const SizedBox(height: 14),
-                Text('카메라 연결 대기 중',
-                    style: TextStyle(
-                        color: Colors.white.withOpacity(0.6),
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600)),
-                const SizedBox(height: 6),
-                Text('서버와 연결되면 자동으로 시작됩니다',
-                    style: TextStyle(
-                        color: Colors.white.withOpacity(0.38), fontSize: 12)),
-              ],
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.videocam_off_rounded,
+                      color: Colors.white.withOpacity(0.28), size: 52),
+                  const SizedBox(height: 14),
+                  Text('카메라 연결 대기 중',
+                      style: TextStyle(
+                          color: Colors.white.withOpacity(0.6),
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 6),
+                  Text('서버와 연결되면 자동으로 시작됩니다',
+                      style: TextStyle(
+                          color: Colors.white.withOpacity(0.38), fontSize: 12)),
+                ],
+              ),
             ),
           ),
         // LIVE 배지
@@ -316,8 +349,8 @@ class _CameraPageState extends State<CameraPage>
                   borderRadius: BorderRadius.circular(20),
                   border: Border.all(
                     color: (_isConnected
-                            ? const Color(0xFF10B981)
-                            : const Color(0xFFEF4444))
+                            ? const Color(0xFF2F6FEB)
+                            : const Color(0xFFDC2626))
                         .withOpacity(_isConnected ? _pulseAnim.value : 1.0),
                   ),
                 ),
@@ -329,10 +362,10 @@ class _CameraPageState extends State<CameraPage>
                       child: Container(
                         width: 7, height: 7,
                         decoration: BoxDecoration(
-                          color: _isConnected ? const Color(0xFF10B981) : const Color(0xFFEF4444),
+                          color: _isConnected ? const Color(0xFF2F6FEB) : const Color(0xFFDC2626),
                           borderRadius: BorderRadius.circular(4),
                           boxShadow: _isConnected
-                              ? [BoxShadow(color: const Color(0xFF10B981).withOpacity(0.6), blurRadius: 4)]
+                              ? [BoxShadow(color: const Color(0xFF2F6FEB).withOpacity(0.6), blurRadius: 4)]
                               : null,
                         ),
                       ),
@@ -341,7 +374,7 @@ class _CameraPageState extends State<CameraPage>
                     Text(
                       _isConnected ? 'LIVE' : 'OFFLINE · 탭하여 재연결',
                       style: TextStyle(
-                        color: _isConnected ? const Color(0xFF10B981) : const Color(0xFFEF4444),
+                        color: _isConnected ? const Color(0xFF2F6FEB) : const Color(0xFFDC2626),
                         fontSize: 11, fontWeight: FontWeight.w700, letterSpacing: 0.8,
                       ),
                     ),
@@ -401,27 +434,33 @@ class _CameraPageState extends State<CameraPage>
         ),
       ],
     );
+      },
+    );
   }
 
   // ── 오늘 통계 바 ──────────────────────────────────────────────────────────
   Widget _buildStatsRow() {
     return Container(
-      color: Colors.white,
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+      ),
       child: Row(
         children: [
           _StatChip(
             icon: Icons.notifications_rounded,
             label: '오늘 발생',
             value: '$_todayCount건',
-            color: const Color(0xFF6366F1),
+            color: const Color(0xFF2F6FEB),
           ),
           const _Divider(),
           _StatChip(
             icon: Icons.check_circle_rounded,
             label: '해결 완료',
             value: '$_resolvedCount건',
-            color: const Color(0xFF10B981),
+            color: const Color(0xFF2F6FEB),
           ),
           const _Divider(),
           _StatChip(
@@ -429,8 +468,8 @@ class _CameraPageState extends State<CameraPage>
             label: '미해결',
             value: '${_unresolvedAlerts.length}건',
             color: _unresolvedAlerts.isNotEmpty
-                ? const Color(0xFFEF4444)
-                : const Color(0xFF94A3B8),
+                ? const Color(0xFFDC2626)
+                : const Color(0xFF6B7684),
           ),
         ],
       ),
@@ -458,8 +497,8 @@ class _CameraPageState extends State<CameraPage>
                   count: _inactivityAlerts.length,
                   gradient: _hasInactivityAlert
                       ? const LinearGradient(colors: [Color(0xFFFEE2E2), Color(0xFFFEF2F2)])
-                      : const LinearGradient(colors: [Color(0xFFECFDF5), Color(0xFFF0FDF4)]),
-                  iconColor: _hasInactivityAlert ? const Color(0xFFEF4444) : const Color(0xFF10B981),
+                      : const LinearGradient(colors: [Colors.white, Colors.white]),
+                  iconColor: _hasInactivityAlert ? const Color(0xFFDC2626) : const Color(0xFF2F6FEB),
                 ),
               ),
               const SizedBox(width: 8),
@@ -471,9 +510,9 @@ class _CameraPageState extends State<CameraPage>
                   isAlert: _hasGasAlert,
                   count: _gasAlerts.length,
                   gradient: _hasGasAlert
-                      ? const LinearGradient(colors: [Color(0xFFFFF7ED), Color(0xFFFFFBEB)])
-                      : const LinearGradient(colors: [Color(0xFFECFDF5), Color(0xFFF0FDF4)]),
-                  iconColor: _hasGasAlert ? const Color(0xFFF97316) : const Color(0xFF10B981),
+                      ? const LinearGradient(colors: [Color(0xFFFEF0F0), Color(0xFFFFF5F5)])
+                      : const LinearGradient(colors: [Colors.white, Colors.white]),
+                  iconColor: _hasGasAlert ? const Color(0xFFDC2626) : const Color(0xFF2F6FEB),
                 ),
               ),
               const SizedBox(width: 8),
@@ -484,8 +523,8 @@ class _CameraPageState extends State<CameraPage>
                   status: '정상',
                   isAlert: false,
                   count: 0,
-                  gradient: const LinearGradient(colors: [Color(0xFFECFDF5), Color(0xFFF0FDF4)]),
-                  iconColor: const Color(0xFF10B981),
+                  gradient: const LinearGradient(colors: [Colors.white, Colors.white]),
+                  iconColor: const Color(0xFF2F6FEB),
                 ),
               ),
             ],
@@ -512,16 +551,16 @@ class _CameraPageState extends State<CameraPage>
                         key: ValueKey('loading'),
                         width: 16, height: 16,
                         child: CircularProgressIndicator(
-                            strokeWidth: 2, color: Color(0xFF6366F1)),
+                            strokeWidth: 2, color: Color(0xFF2F6FEB)),
                       )
                     : const Row(
                         key: ValueKey('refresh'),
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Icon(Icons.refresh_rounded, size: 15, color: Color(0xFF6366F1)),
+                          Icon(Icons.refresh_rounded, size: 15, color: Color(0xFF2F6FEB)),
                           SizedBox(width: 3),
                           Text('새로고침',
-                              style: TextStyle(fontSize: 12, color: Color(0xFF6366F1),
+                              style: TextStyle(fontSize: 12, color: Color(0xFF2F6FEB),
                                   fontWeight: FontWeight.w500)),
                         ],
                       ),
@@ -531,13 +570,13 @@ class _CameraPageState extends State<CameraPage>
         ),
         const SizedBox(height: 4),
         Text('아래로 당겨서 갱신 · ${_countdown}초 후 자동 갱신',
-            style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8))),
+            style: const TextStyle(fontSize: 11, color: Color(0xFF6B7684))),
         const SizedBox(height: 14),
         if (_isLoading)
           const Center(
             child: Padding(
               padding: EdgeInsets.all(40),
-              child: CircularProgressIndicator(color: Color(0xFF6366F1)),
+              child: CircularProgressIndicator(color: Color(0xFF2F6FEB)),
             ),
           ),
         if (!_isLoading && _allAlerts.isEmpty)
@@ -560,19 +599,19 @@ class _CameraPageState extends State<CameraPage>
                 decoration: BoxDecoration(
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: const Color(0xFFE2E8F0)),
+                  border: Border.all(color: const Color(0xFFEDF0F3)),
                 ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
                     const Text('전체 기록 보기',
                         style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600,
-                            color: Color(0xFF6366F1))),
+                            color: Color(0xFF2F6FEB))),
                     const SizedBox(width: 4),
                     Text('(${_allAlerts.length}건)',
-                        style: const TextStyle(fontSize: 12, color: Color(0xFF94A3B8))),
+                        style: const TextStyle(fontSize: 12, color: Color(0xFF6B7684))),
                     const SizedBox(width: 4),
-                    const Icon(Icons.chevron_right_rounded, size: 16, color: Color(0xFF6366F1)),
+                    const Icon(Icons.chevron_right_rounded, size: 16, color: Color(0xFF2F6FEB)),
                   ],
                 ),
               ),
@@ -591,7 +630,7 @@ class _CameraPageState extends State<CameraPage>
     final iconData = isGas
         ? Icons.local_fire_department_rounded
         : Icons.accessibility_new_rounded;
-    final activeColor = isGas ? const Color(0xFFF97316) : const Color(0xFFEF4444);
+    final activeColor = isGas ? const Color(0xFFDC2626) : const Color(0xFFDC2626);
 
     return IntrinsicHeight(
       child: Row(
@@ -605,7 +644,7 @@ class _CameraPageState extends State<CameraPage>
                 Container(
                   width: 28, height: 28,
                   decoration: BoxDecoration(
-                    color: isUnresolved ? activeColor : const Color(0xFF10B981),
+                    color: isUnresolved ? activeColor : const Color(0xFF2F6FEB),
                     borderRadius: BorderRadius.circular(8),
                     boxShadow: isUnresolved
                         ? [BoxShadow(color: activeColor.withOpacity(0.3), blurRadius: 6, offset: const Offset(0, 2))]
@@ -620,7 +659,7 @@ class _CameraPageState extends State<CameraPage>
                   Expanded(
                     child: Container(
                       width: 2,
-                      color: const Color(0xFFE2E8F0),
+                      color: const Color(0xFFEDF0F3),
                     ),
                   ),
               ],
@@ -638,7 +677,7 @@ class _CameraPageState extends State<CameraPage>
                   color: Colors.white,
                   borderRadius: BorderRadius.circular(12),
                   border: Border.all(
-                    color: isUnresolved ? activeColor.withOpacity(0.4) : const Color(0xFFE2E8F0),
+                    color: isUnresolved ? activeColor.withOpacity(0.4) : const Color(0xFFEDF0F3),
                   ),
                   boxShadow: [
                     BoxShadow(
@@ -659,14 +698,14 @@ class _CameraPageState extends State<CameraPage>
                           decoration: BoxDecoration(
                             color: isUnresolved
                                 ? activeColor.withOpacity(0.1)
-                                : const Color(0xFFF0FDF4),
+                                : const Color(0xFFEFF5FF),
                             borderRadius: BorderRadius.circular(6),
                           ),
                           child: Text(
                             type.isEmpty ? '알림' : type,
                             style: TextStyle(
                               fontSize: 10, fontWeight: FontWeight.w700,
-                              color: isUnresolved ? activeColor : const Color(0xFF10B981),
+                              color: isUnresolved ? activeColor : const Color(0xFF2F6FEB),
                               letterSpacing: 0.3,
                             ),
                           ),
@@ -678,7 +717,7 @@ class _CameraPageState extends State<CameraPage>
                             child: Container(
                               padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                               decoration: BoxDecoration(
-                                color: const Color(0xFF6366F1),
+                                color: const Color(0xFF2F6FEB),
                                 borderRadius: BorderRadius.circular(20),
                               ),
                               child: const Text('해결',
@@ -688,19 +727,19 @@ class _CameraPageState extends State<CameraPage>
                           )
                         else
                           const Icon(Icons.check_circle_rounded,
-                              color: Color(0xFF10B981), size: 18),
+                              color: Color(0xFF2F6FEB), size: 18),
                       ],
                     ),
                     const SizedBox(height: 8),
                     Text(
                       alert["content"] as String? ?? '',
                       style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500,
-                          color: Color(0xFF1E293B), height: 1.4),
+                          color: Color(0xFF191F28), height: 1.4),
                     ),
                     const SizedBox(height: 6),
                     Text(
                       _formatTimestamp(alert["time"] as String? ?? ''),
-                      style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8)),
+                      style: const TextStyle(fontSize: 11, color: Color(0xFF6B7684)),
                     ),
                   ],
                 ),
@@ -719,17 +758,17 @@ class _CameraPageState extends State<CameraPage>
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: const Color(0xFFE2E8F0)),
+        border: Border.all(color: const Color(0xFFEDF0F3)),
       ),
       child: const Column(
         children: [
-          Icon(Icons.shield_rounded, color: Color(0xFF10B981), size: 48),
+          Icon(Icons.shield_rounded, color: Color(0xFF2F6FEB), size: 48),
           SizedBox(height: 12),
           Text('이상 감지 없음', style: TextStyle(fontSize: 15,
-              fontWeight: FontWeight.w600, color: Color(0xFF1E293B))),
+              fontWeight: FontWeight.w600, color: Color(0xFF191F28))),
           SizedBox(height: 4),
           Text('모든 센서가 정상 작동 중입니다',
-              style: TextStyle(fontSize: 13, color: Color(0xFF94A3B8))),
+              style: TextStyle(fontSize: 13, color: Color(0xFF6B7684))),
         ],
       ),
     );
@@ -748,7 +787,7 @@ class _CameraPageState extends State<CameraPage>
   Widget _buildSectionHeader(String title) {
     return Text(title,
         style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700,
-            color: Color(0xFF0F172A)));
+            color: Color(0xFF191F28)));
   }
 
   Widget _buildGlassBadge({required Widget child}) {
@@ -790,7 +829,7 @@ class _AllAlertsSheet extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       decoration: const BoxDecoration(
-        color: Color(0xFFF8FAFC),
+        color: Color(0xFFF2F4F6),
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
       child: Column(
@@ -800,7 +839,7 @@ class _AllAlertsSheet extends StatelessWidget {
             margin: const EdgeInsets.symmetric(vertical: 12),
             width: 36, height: 4,
             decoration: BoxDecoration(
-              color: const Color(0xFFE2E8F0),
+              color: const Color(0xFFEDF0F3),
               borderRadius: BorderRadius.circular(2),
             ),
           ),
@@ -809,7 +848,7 @@ class _AllAlertsSheet extends StatelessWidget {
             child: Row(children: [
               Text('전체 감지 기록',
                   style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700,
-                      color: Color(0xFF0F172A))),
+                      color: Color(0xFF191F28))),
             ]),
           ),
           const SizedBox(height: 4),
@@ -817,7 +856,7 @@ class _AllAlertsSheet extends StatelessWidget {
             padding: const EdgeInsets.symmetric(horizontal: 20),
             child: Row(children: [
               Text('총 ${alerts.length}건',
-                  style: const TextStyle(fontSize: 13, color: Color(0xFF94A3B8))),
+                  style: const TextStyle(fontSize: 13, color: Color(0xFF6B7684))),
             ]),
           ),
           const SizedBox(height: 16),
@@ -834,28 +873,28 @@ class _AllAlertsSheet extends StatelessWidget {
                 final isUnresolved = alert["status"] == "처리 중";
                 final type = alert["type"] as String? ?? '';
                 final isGas = type == "가스";
-                final color = isGas ? const Color(0xFFF97316) : const Color(0xFFEF4444);
+                final color = isGas ? const Color(0xFFDC2626) : const Color(0xFFDC2626);
                 return Container(
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(
-                      color: isUnresolved ? color.withOpacity(0.3) : const Color(0xFFE2E8F0),
+                      color: isUnresolved ? color.withOpacity(0.3) : const Color(0xFFEDF0F3),
                     ),
                   ),
                   child: Row(children: [
                     Container(
                       width: 36, height: 36,
                       decoration: BoxDecoration(
-                        color: isUnresolved ? color.withOpacity(0.1) : const Color(0xFFF0FDF4),
+                        color: isUnresolved ? color.withOpacity(0.1) : const Color(0xFFEFF5FF),
                         borderRadius: BorderRadius.circular(10),
                       ),
                       child: Icon(
                         isUnresolved
                             ? (isGas ? Icons.local_fire_department_rounded : Icons.accessibility_new_rounded)
                             : Icons.check_circle_rounded,
-                        color: isUnresolved ? color : const Color(0xFF10B981),
+                        color: isUnresolved ? color : const Color(0xFF2F6FEB),
                         size: 18,
                       ),
                     ),
@@ -863,10 +902,10 @@ class _AllAlertsSheet extends StatelessWidget {
                     Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                       Text(alert["content"] as String? ?? '',
                           style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500,
-                              color: Color(0xFF1E293B))),
+                              color: Color(0xFF191F28))),
                       const SizedBox(height: 2),
                       Text(alert["time"] as String? ?? '',
-                          style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8))),
+                          style: const TextStyle(fontSize: 11, color: Color(0xFF6B7684))),
                     ])),
                     if (isUnresolved && alert["id"] != null)
                       GestureDetector(
@@ -877,7 +916,7 @@ class _AllAlertsSheet extends StatelessWidget {
                         child: Container(
                           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF6366F1),
+                            color: const Color(0xFF2F6FEB),
                             borderRadius: BorderRadius.circular(20),
                           ),
                           child: const Text('해결',
@@ -913,7 +952,7 @@ class _StatChip extends StatelessWidget {
         Row(mainAxisAlignment: MainAxisAlignment.center, children: [
           Icon(icon, size: 13, color: color),
           const SizedBox(width: 4),
-          Text(label, style: const TextStyle(fontSize: 11, color: Color(0xFF94A3B8))),
+          Text(label, style: const TextStyle(fontSize: 11, color: Color(0xFF6B7684))),
         ]),
         const SizedBox(height: 3),
         Text(value,
@@ -928,7 +967,7 @@ class _Divider extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(width: 1, height: 36, color: const Color(0xFFE2E8F0),
+    return Container(width: 1, height: 36, color: const Color(0xFFEDF0F3),
         margin: const EdgeInsets.symmetric(horizontal: 8));
   }
 }
@@ -952,16 +991,8 @@ class _SensorCard extends StatelessWidget {
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
         gradient: gradient,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(
-          color: isAlert ? iconColor.withOpacity(0.4) : const Color(0xFFE2E8F0),
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: isAlert ? iconColor.withOpacity(0.1) : Colors.black.withOpacity(0.03),
-            blurRadius: 10, offset: const Offset(0, 3),
-          ),
-        ],
+        borderRadius: BorderRadius.circular(20),
+        border: isAlert ? Border.all(color: iconColor.withOpacity(0.4)) : null,
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1000,7 +1031,7 @@ class _SensorCard extends StatelessWidget {
               const SizedBox(height: 2),
               Text(status,
                   style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700,
-                      color: isAlert ? iconColor : const Color(0xFF10B981))),
+                      color: isAlert ? iconColor : const Color(0xFF2F6FEB))),
             ],
           ),
         ],
