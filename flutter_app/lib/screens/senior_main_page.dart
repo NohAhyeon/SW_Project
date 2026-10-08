@@ -2624,6 +2624,12 @@ class _SettingsTab extends StatelessWidget {
             ]),
             const SizedBox(height: 4),
 
+            // 챗봇 이름 (어르신이 부르는 애칭)
+            _SettingSection(title: '챗봇', children: [
+              _WakeNameRow(senior: seniorView),
+            ]),
+            const SizedBox(height: 4),
+
             // 화면 설정
             _SettingSection(title: '화면 설정', children: [
               Padding(
@@ -2714,6 +2720,166 @@ class _SettingsTab extends StatelessWidget {
               ),
             ]),
             const SizedBox(height: 40),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ── 챗봇 이름 설정 행: 어르신이 '○○야' 하고 부르는 애칭
+String _callingName(String name) {
+  final code = name.codeUnitAt(name.length - 1) - 0xAC00;
+  final batchim = code >= 0 && code < 11172 && code % 28 != 0;
+  return name + (batchim ? '아' : '야');
+}
+
+class _WakeNameRow extends StatefulWidget {
+  final bool senior;
+  const _WakeNameRow({required this.senior});
+  @override
+  State<_WakeNameRow> createState() => _WakeNameRowState();
+}
+
+class _WakeNameRowState extends State<_WakeNameRow> {
+  String? _name;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final n = await ApiService.getWakeName();
+    if (mounted) setState(() => _name = n);
+  }
+
+  void _toast(String msg) =>
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+
+  Future<void> _edit() async {
+    final ctrl = TextEditingController(text: _name ?? '');
+    String? error;
+    await showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => StatefulBuilder(
+        builder: (ctx, setSheet) => Container(
+          decoration: const BoxDecoration(
+            color: _surface,
+            borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+          ),
+          padding: EdgeInsets.fromLTRB(24, 20, 24, MediaQuery.of(ctx).viewInsets.bottom + 28),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(width: 40, height: 4,
+                    decoration: BoxDecoration(color: _line, borderRadius: BorderRadius.circular(2))),
+              ),
+              const SizedBox(height: 20),
+              const Text('챗봇 이름 정하기',
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: _text1)),
+              const SizedBox(height: 6),
+              const Text('어르신이 이 이름으로 부르면 대답해요.\n부르기 쉬운 2~6글자 이름이 좋아요.',
+                  style: TextStyle(fontSize: 14, color: _text3, height: 1.5)),
+              const SizedBox(height: 18),
+              TextField(
+                controller: ctrl,
+                autofocus: true,
+                maxLength: 6,
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700),
+                decoration: InputDecoration(
+                  hintText: '예: 복실이, 순이, 오아시스',
+                  errorText: error,
+                  filled: true,
+                  fillColor: _bg,
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
+                ),
+                onChanged: (_) => setSheet(() => error = null),
+              ),
+              if (ctrl.text.trim().length >= 2)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Text("어르신은 '${_callingName(ctrl.text.trim())}' 하고 부르시면 돼요",
+                      style: const TextStyle(fontSize: 14, color: _brand, fontWeight: FontWeight.w600)),
+                ),
+              const SizedBox(height: 8),
+              SizedBox(
+                width: double.infinity, height: 54,
+                child: ElevatedButton(
+                  onPressed: () async {
+                    final err = await ApiService.setWakeName(ctrl.text.trim());
+                    if (err != null) {
+                      setSheet(() => error = err);
+                      return;
+                    }
+                    if (ctx.mounted) Navigator.pop(ctx);
+                    await _load();
+                    _toast("이제 '${_callingName(_name ?? '')}' 하고 부르면 대답해요");
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: _brand, foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+                  ),
+                  child: const Text('저장', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700)),
+                ),
+              ),
+              const SizedBox(height: 10),
+              Center(
+                child: TextButton(
+                  onPressed: () async {
+                    final ok = await ApiService.resetWakeName();
+                    if (ctx.mounted) Navigator.pop(ctx);
+                    await _load();
+                    _toast(ok ? '다음에 말을 걸면 어르신께 이름을 여쭤봐요' : '서버에 연결할 수 없어요');
+                  },
+                  child: const Text('어르신이 직접 짓도록 처음부터 다시 하기',
+                      style: TextStyle(fontSize: 14, color: _text3, fontWeight: FontWeight.w600)),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final s = widget.senior;
+    final name = _name;
+    return InkWell(
+      onTap: _edit,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+        child: Row(
+          children: [
+            Container(
+              width: 36, height: 36,
+              decoration: BoxDecoration(color: _brandSoft, borderRadius: BorderRadius.circular(10)),
+              child: const Icon(Icons.record_voice_over_rounded, color: _brand, size: 18),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('챗봇 이름',
+                      style: TextStyle(fontSize: s ? 19 : 16, fontWeight: FontWeight.w700, color: _text1)),
+                  Text(name == null ? '불러오는 중…' : "'${_callingName(name)}' 하고 부르면 대답해요",
+                      style: TextStyle(fontSize: s ? 15 : 13, color: _text3)),
+                ],
+              ),
+            ),
+            Text(name ?? '',
+                style: TextStyle(fontSize: s ? 19 : 16, fontWeight: FontWeight.w700, color: _brand)),
+            const SizedBox(width: 4),
+            const Icon(Icons.chevron_right_rounded, color: _text4),
           ],
         ),
       ),

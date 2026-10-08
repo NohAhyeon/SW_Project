@@ -244,6 +244,42 @@ class ApiService {
   }
 
   // ===== 알림 =====
+  // ===== 챗봇 이름 (어르신이 부르는 애칭) =====
+  static Future<String?> getWakeName() async {
+    try {
+      final res = await http.get(Uri.parse('$baseUrl/talk/wake-name'));
+      if (res.statusCode == 200) return jsonDecode(utf8.decode(res.bodyBytes))['name'] as String?;
+    } catch (e) {
+      print('챗봇 이름 조회 오류: $e');
+    }
+    return null;
+  }
+
+  /// 성공하면 null, 실패하면 사용자에게 보여줄 오류 문구
+  static Future<String?> setWakeName(String name) async {
+    try {
+      final res = await http.put(
+        Uri.parse('$baseUrl/talk/wake-name'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'name': name}),
+      );
+      if (res.statusCode == 200) return null;
+      final body = jsonDecode(utf8.decode(res.bodyBytes));
+      return (body['detail'] ?? '이름을 저장하지 못했어요.').toString();
+    } catch (e) {
+      return '서버에 연결할 수 없어요.';
+    }
+  }
+
+  static Future<bool> resetWakeName() async {
+    try {
+      final res = await http.delete(Uri.parse('$baseUrl/talk/wake-name'));
+      return res.statusCode == 200;
+    } catch (e) {
+      return false;
+    }
+  }
+
   static Future<List<Map>> getAlerts() async {
     if (_useMock) return [
       {"time": "2026-06-22T08:00:00", "content": "비활동 감지", "status": "처리 완료", "type": "비활동", "id": 1},

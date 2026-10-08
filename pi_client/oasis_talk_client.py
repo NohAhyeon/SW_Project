@@ -4,6 +4,8 @@
 my_ai_project/main.py 의 get_ai_response() 와 save_message() 호출을 이 코드로 바꾸면 된다.
   - 대답 생성 + 대화 저장 + 약 복용 기록 + 위급 알림을 백엔드가 한 번에 처리한다.
   - 1.5초 안에 대답이 안 오면 "음, 잠시만요"를 먼저 말해 어르신이 기다리는 걸 알 수 있게 한다.
+  - 챗봇 이름(애칭)을 부른 말에만 대답한다. 이름을 안 부른 말(TV, 다른 사람)은 None 이 돌아온다.
+    처음 켰을 때는 어르신께 이름을 여쭤보고, 어르신이 지어 준 이름이 저장된다.
 """
 import threading
 import requests
@@ -15,7 +17,8 @@ FILLER_AFTER_SEC = 1.5
 
 
 def get_ai_response(text, speak):
-    """text: 음성 인식 결과, speak: 기존 TTS 함수 (예: speak("안녕하세요"))"""
+    """text: 음성 인식 결과, speak: 기존 TTS 함수 (예: speak("안녕하세요"))
+    → 할 말(문자열) 또는 None(대답하지 않음)"""
     filler = threading.Timer(FILLER_AFTER_SEC, lambda: speak("음, 잠시만요."))
     filler.start()
     try:
@@ -23,6 +26,8 @@ def get_ai_response(text, speak):
                             json={"text": text, "session_id": SESSION_ID, "senior_id": SENIOR_ID},
                             timeout=40)
         data = res.json()
+        if not data.get("respond", True):
+            return None                          # 챗봇 이름을 부르지 않은 말 → 조용히
         # 응답 시간 측정 로그 (발표 자료용)
         print(f"[talk] {data['intent']} · {data['source']} · 전체 {data['latency_ms']}ms · AI {data['llm_ms']}ms")
         return data["reply"]
@@ -35,5 +40,6 @@ def get_ai_response(text, speak):
 # 사용 예 (stt_processing_thread 안에서):
 #   user_text = transcription.text
 #   reply = get_ai_response(user_text, speak)
-#   speak(reply)
+#   if reply:
+#       speak(reply)
 # ※ 기존 save_message("user", ...) / save_message("assistant", ...) 는 지워야 대화가 두 번 저장되지 않는다.

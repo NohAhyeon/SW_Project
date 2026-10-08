@@ -25,7 +25,9 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from crypto import decrypt, encrypt
-from models import Alert, Conversation, Medicine, Schedule, User
+from difflib import SequenceMatcher
+
+from models import Alert, Conversation, Medicine, Schedule, Setting, User
 
 load_dotenv()
 # 날씨 키는 앱 쪽 .env 에 있으므로 함께 읽는다 (이미 있는 값은 덮어쓰지 않음)
@@ -82,6 +84,169 @@ WEATHER_RE   = re.compile(r"날씨|비와|비가와|더워|추워|우산")
 
 # 세션별 "보호자분께 알릴까요?" 확인 대기 상태
 _pending_confirm: dict[str, dict] = {}
+
+
+# ════════════════════════════════════════════════════════════
+#  이름 부르기 (호출어)
+#   - 이름을 부른 말에만 대답한다 (TV 소리·다른 사람 대화에는 반응하지 않고 저장도 하지 않음)
+#   - 이름만 부르면 "네, 말씀하세요" → WAKE_WINDOW_SEC 동안은 이름 없이 이어서 대화
+#   - 위급한 말("살려줘", "불이야")은 이름이 없어도 바로 반응
+#   - 이름은 앱 설정에서 바꾼다 (settings 테이블 key = "wake_name")
+# ════════════════════════════════════════════════════════════
+DEFAULT_WAKE_NAME = "오아시스"
+WAKE_WINDOW_SEC   = float(os.getenv("WAKE_WINDOW_SEC", "20"))
+END_WORDS         = ["그만", "됐어", "잘자", "잘있어", "조용히", "이제됐", "끝내"]
+_awake_until: dict[str, float] = {}
+_wake_cache = {"name": None, "at": 0.0}
+
+
+def _jamo(s: str) -> str:
+    """'오아' → 'ㅇㅗㅇㅏ' 처럼 자음·모음으로 풀어서, 받아쓰기가 조금 틀려도 비교할 수 있게 한다"""
+    out = []
+    for ch in s:
+        code = ord(ch) - 0xAC00
+        if 0 <= code < 11172:
+            out += [chr(0x1100 + code // 588), chr(0x1161 + (code % 588) // 28)]
+            if code % 28:
+                out.append(chr(0x11A7 + code % 28))
+        else:
+            out.append(ch.lower())
+    return "".join(out)
+
+
+def find_wake_name(t: str, name: str):
+    """띄어쓰기 없앤 문장 t 에서 이름을 찾는다 → 찾은 부분 문자열 또는 None.
+    3글자 이상 이름은 받아쓰기 오차(오아시쓰, 아시스)도 허용, 2글자 이하는 정확히 일치할 때만."""
+    name = _norm(name)
+    if not name:
+        return None
+    if name in t:
+        return name
+    if len(name) < 3:
+        return None
+    target = _jamo(name)
+    best, best_ratio = None, 0.0
+    for size in (len(name) - 1, len(name), len(name) + 1):
+        for i in range(0, max(len(t) - size + 1, 0)):
+            sub = t[i:i + size]
+            ratio = SequenceMatcher(None, _jamo(sub), target).ratio()
+            if ratio > best_ratio:
+                best, best_ratio = sub, ratio
+    return best if best_ratio >= 0.8 else None
+
+
+def strip_wake_name(text: str, found: str) -> str:
+    """원래 문장에서 이름(+ '야', '아' 같은 부르는 말)을 떼어낸다"""
+    pattern = r"\s*".join(map(re.escape, found)) + r"(?:\s*(?:야|아|이|씨|님))?[\s,.!?~]*"
+    return re.sub(pattern, " ", text, count=1).strip()
+
+
+def validate_wake_name(name: str) -> str:
+    name = re.sub(r"\s+", "", name or "")
+    if not 2 <= len(name) <= 6 or not re.fullmatch(r"[가-힣A-Za-z]+", name):
+        raise ValueError("이름은 띄어쓰기 없이 한글이나 영어 2~6글자로 정해 주세요.")
+    return name
+
+
+async def get_wake_name(db: AsyncSession) -> str:
+    if _wake_cache["name"] and time.time() - _wake_cache["at"] < 10:
+        return _wake_cache["name"]
+    res = await db.execute(select(Setting).where(Setting.key == "wake_name"))
+    row = res.scalar_one_or_none()
+    _wake_cache.update(name=(row.value if row and row.value else DEFAULT_WAKE_NAME), at=time.time())
+    return _wake_cache["name"]
+
+
+async def set_wake_name(db: AsyncSession, name: str) -> str:
+    name = validate_wake_name(name)
+    res = await db.execute(select(Setting).where(Setting.key == "wake_name"))
+    row = res.scalar_one_or_none()
+    if row:
+        row.value = name
+    else:
+        db.add(Setting(key="wake_name", value=name))
+    await db.commit()
+    _wake_cache.update(name=name, at=time.time())
+    return name
+
+
+# ── 처음 이름 짓기 (어르신이 음성으로 챗봇 애칭을 정함) ─────────
+#   이름이 아직 없으면 첫 대화에서 이름을 여쭤보고, 확인을 받은 뒤 저장한다.
+#   "네 이름 바꾸고 싶어" 라고 하면 언제든 다시 짓는다.
+_naming: dict[str, dict] = {}
+RENAME_RE = re.compile(r"이름(을|좀)?(바꾸|바꿔|바꿀|새로|다시|지어|정하|정해)")
+CANCEL_WORDS = ["안해", "안할래", "나중에", "됐어", "그냥둬", "하지마"]
+
+
+def _calling(name: str) -> str:
+    """부를 때 붙는 말: 받침 있으면 '아'(복실→복실아), 없으면 '야'(순이→순이야)"""
+    last = name[-1]
+    code = ord(last) - 0xAC00
+    has_batchim = 0 <= code < 11172 and code % 28 != 0
+    return name + ("아" if has_batchim else "야")
+
+
+def _subject(name: str) -> str:
+    code = ord(name[-1]) - 0xAC00
+    return name + ("이에요" if 0 <= code < 11172 and code % 28 else "예요")
+
+
+def extract_name(text: str) -> str:
+    """'복실이로 해', '복실이라고 불러줄게', '음 복실이' → '복실이'"""
+    t = _norm(text)
+    t = re.sub(r"^(음+|어+|그럼|그러면|이름은|네이름은|너는|니이름은|너이름은)", "", t)
+    t = re.sub(r"라고(불러줄게|부를게|불러|할게|해|하자|지을게)?(요)?$", "", t)   # '이'는 남김(복실이라고→복실이)
+    t = re.sub(r"(으로|로)(해줘|할게|해|하자|정할게|지을게|부를게|불러줄게)?(요)?$", "", t)
+    t = re.sub(r"(어때|어떠니|어떨까|할까)(요)?$", "", t)
+    return t
+
+
+async def is_wake_name_set(db: AsyncSession) -> bool:
+    res = await db.execute(select(Setting).where(Setting.key == "wake_name"))
+    row = res.scalar_one_or_none()
+    return bool(row and row.value)
+
+
+async def reset_wake_name(db: AsyncSession) -> None:
+    """앱의 '처음 설정 다시 하기': 이름을 지우면 다음 대화에서 이름을 다시 여쭤본다"""
+    res = await db.execute(select(Setting).where(Setting.key == "wake_name"))
+    row = res.scalar_one_or_none()
+    if row:
+        await db.delete(row)
+        await db.commit()
+    _wake_cache.update(name=None, at=0.0)
+    _naming.clear()
+
+
+async def _naming_step(db: AsyncSession, session_id: str, t: str, text: str) -> str:
+    """이름 짓기 대화 한 단계 → 오아시스가 할 말"""
+    state = _naming.setdefault(session_id, {"stage": "ask"})
+    if _has(CANCEL_WORDS, t):
+        _naming.pop(session_id, None)
+        if not await is_wake_name_set(db):
+            await set_wake_name(db, DEFAULT_WAKE_NAME)
+        name = await get_wake_name(db)
+        return f"알겠어요. 그럼 '{_calling(name)}' 하고 불러 주세요."
+
+    if state["stage"] == "confirm":
+        if t in YES_EXACT or _has(["맞아", "그래", "좋아", "응"], t):
+            name = await set_wake_name(db, state["name"])
+            _naming.pop(session_id, None)
+            _awake_until[session_id] = time.time() + WAKE_WINDOW_SEC
+            return f"좋아요! 이제부터 저는 {_subject(name)}. '{_calling(name)}' 하고 부르시면 대답할게요."
+        if _has(NO_WORDS, t) or "틀렸" in t or "다시" in t:
+            state.update(stage="ask")
+            return "그럼 뭐라고 불러 주실래요? 다시 한 번 말씀해 주세요."
+        # 확인 대신 새 이름을 말씀하신 경우 → 새 이름으로 다시 확인
+
+    candidate = extract_name(text)
+    try:
+        candidate = validate_wake_name(candidate)
+    except ValueError:
+        state.update(stage="ask")
+        return "잘 못 들었어요. '복실이'처럼 두세 글자 이름으로 다시 말씀해 주세요."
+    state.update(stage="confirm", name=candidate)
+    return f"'{candidate}'라고 부르시는 거 맞아요?"
 
 
 def _norm(text: str) -> str:
@@ -220,10 +385,10 @@ async def _raise_alert(db: AsyncSession, senior_id: int, text: str) -> None:
 # ════════════════════════════════════════════════════════════
 #  LLM
 # ════════════════════════════════════════════════════════════
-def _system_prompt(profile: dict) -> str:
+def _system_prompt(profile: dict, wake_name: str = DEFAULT_WAKE_NAME) -> str:
     now = datetime.now()
     lines = [
-        f"너는 '오아시스'야. {profile['호칭']}과 이야기하는 다정한 말벗이야.",
+        f"너의 이름은 '{wake_name}'이야. {profile['호칭']}과 이야기하는 다정한 말벗이야.",
         "규칙:",
         "1. 한국어 존댓말, 쉬운 말로 1~2문장만 말해.",
         "2. 이모티콘, 영어, 기호, 목록을 쓰지 마.",
@@ -310,10 +475,64 @@ async def _save(db: AsyncSession, session_id: str, senior_id: int, role: str, te
     await db.commit()
 
 
-async def reply(db: AsyncSession, text: str, session_id: str, senior_id: int) -> dict:
+async def reply(db: AsyncSession, text: str, session_id: str, senior_id: int,
+                require_wake: bool = True) -> dict:
     started = time.perf_counter()
     t = _norm(text)
     intent, ctype, source, llm_ms = "chat", "생활정보", "rule", 0
+
+    # ── 이름 짓기: 처음 켰을 때(이름 없음) 또는 이름 바꾸는 중 ──
+    urgent_now = _has(EMERGENCY_WORDS, t) and "뻔" not in t
+    if not urgent_now and len(t) >= 1:
+        first_time = require_wake and not await is_wake_name_set(db)
+        if session_id in _naming or first_time:
+            if first_time and session_id not in _naming:
+                _naming[session_id] = {"stage": "ask"}
+                answer = "안녕하세요! 저를 뭐라고 불러 주실래요? 부르기 편한 이름을 지어 주세요."
+            else:
+                answer = await _naming_step(db, session_id, t, text)
+            await _save(db, session_id, senior_id, "user", text, "생활정보")
+            await _save(db, session_id, senior_id, "assistant", answer, "생활정보")
+            return {"respond": True, "reply": answer, "intent": "naming", "source": "rule",
+                    "wake_name": await get_wake_name(db),
+                    "latency_ms": int((time.perf_counter() - started) * 1000), "llm_ms": 0}
+
+    # ── 호출어: 이름을 부른 말에만 대답 ─────────────────────
+    wake_name = await get_wake_name(db)
+    if require_wake:
+        awake = time.time() < _awake_until.get(session_id, 0) or session_id in _pending_confirm
+        urgent = _has(EMERGENCY_WORDS, t) and "뻔" not in t
+        found = find_wake_name(t, wake_name)
+        if not (awake or found or urgent):
+            return {"respond": False, "reply": "", "intent": "ignored", "source": "rule",
+                    "wake_name": wake_name, "latency_ms": int((time.perf_counter() - started) * 1000),
+                    "llm_ms": 0}
+        if found:
+            text = strip_wake_name(text, found)
+            t = _norm(text)
+            if len(t) < 2:                       # 이름만 불렀을 때
+                _awake_until[session_id] = time.time() + WAKE_WINDOW_SEC
+                answer = "네, 말씀하세요."
+                await _save(db, session_id, senior_id, "assistant", answer, ctype)
+                return {"respond": True, "reply": answer, "intent": "wake", "source": "rule",
+                        "wake_name": wake_name, "latency_ms": int((time.perf_counter() - started) * 1000),
+                        "llm_ms": 0}
+        if RENAME_RE.search(t):                  # "네 이름 바꾸고 싶어"
+            _naming[session_id] = {"stage": "ask"}
+            answer = "좋아요. 그럼 뭐라고 불러 주실래요?"
+            await _save(db, session_id, senior_id, "user", text, ctype)
+            await _save(db, session_id, senior_id, "assistant", answer, ctype)
+            return {"respond": True, "reply": answer, "intent": "naming", "source": "rule",
+                    "wake_name": wake_name, "latency_ms": int((time.perf_counter() - started) * 1000),
+                    "llm_ms": 0}
+        if _has(END_WORDS, t) and len(t) <= 8:   # "그만", "잘 자" → 대화 끝
+            _awake_until.pop(session_id, None)
+            answer = f"네, 필요하시면 '{_calling(wake_name)}' 하고 불러 주세요."
+            await _save(db, session_id, senior_id, "user", text, ctype)
+            await _save(db, session_id, senior_id, "assistant", answer, ctype)
+            return {"respond": True, "reply": answer, "intent": "sleep", "source": "rule",
+                    "wake_name": wake_name, "latency_ms": int((time.perf_counter() - started) * 1000),
+                    "llm_ms": 0}
 
     # 0) 직전에 "보호자분께 알릴까요?"라고 여쭤본 경우
     pending = _pending_confirm.pop(session_id, None)
@@ -365,15 +584,19 @@ async def reply(db: AsyncSession, text: str, session_id: str, senior_id: int) ->
     else:
         res = await db.execute(select(User).where(User.id == senior_id))
         profile = _load_profile(senior_id, res.scalar_one_or_none())
-        messages = ([{"role": "system", "content": _system_prompt(profile)}]
+        messages = ([{"role": "system", "content": _system_prompt(profile, wake_name)}]
                     + await _recent_turns(db, session_id)
                     + [{"role": "user", "content": text}])
         answer, source, llm_ms = await _ask_llm(messages)
 
     await _save(db, session_id, senior_id, "user", text, ctype)
     await _save(db, session_id, senior_id, "assistant", answer, ctype)
+    if require_wake:                             # 대답한 뒤에는 이름 없이 이어서 말해도 됨
+        _awake_until[session_id] = time.time() + WAKE_WINDOW_SEC
 
     return {
+        "respond": True,
+        "wake_name": wake_name,
         "reply": answer,
         "intent": intent,
         "source": source,            # rule | db | api | local | cloud | fallback
