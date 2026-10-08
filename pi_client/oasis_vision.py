@@ -329,13 +329,17 @@ def find_usb_camera(base="/sys/class/video4linux"):
             continue
         idx = int(name.replace("video", ""))
         lower = label.lower()
-        if any(k in lower for k in ("usb", "webcam", "camera", "uvc")) and \
-                not any(k in lower for k in ("rp1-cfe", "pispbe", "hevc", "codec", "isp")):
-            usb.append(idx)
-            print(f"  [카메라 후보] /dev/video{idx}: {label}")
+        internal = any(k in lower for k in ("rp1-cfe", "pispbe", "hevc", "codec", "isp", "bcm2835", "unicam"))
+        if internal:
+            continue                                  # 파이 내부 영상 장치는 웹캠이 아님
+        if any(k in lower for k in ("usb", "webcam", "camera", "uvc")):
+            usb.append(idx)                           # 이름으로 확실한 웹캠
         else:
-            others.append(idx)
-    return usb or [0]
+            others.append(idx)                        # 이름에 표시가 없는 웹캠도 시도
+        print(f"  [카메라 후보] /dev/video{idx}: {label}")
+    if not usb and not others:
+        print("  ⚠ 파이가 USB 웹캠을 인식하지 못했어요 (lsusb 로 확인, 다른 USB 포트에 꽂아보기)")
+    return usb + others or [0]
 
 
 def open_camera():
