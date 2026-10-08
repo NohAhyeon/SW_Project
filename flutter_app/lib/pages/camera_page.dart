@@ -162,7 +162,8 @@ class _CameraPageState extends State<CameraPage>
 
     if (!mounted) return;
     final hadCritical = _hasCriticalAlert;
-    const sensorTypes = {'비활동', '가스', '낙상', '긴급'};
+    // 비활동 감지는 수면·TV 시청 오작동 우려로 사용하지 않음 (가스·낙상·긴급만 표시)
+    const sensorTypes = {'가스', '낙상', '긴급'};
     setState(() {
       _allAlerts = data.where((a) => sensorTypes.contains(a['type'])).toList();
       _isLoading = false;
@@ -510,20 +511,6 @@ class _CameraPageState extends State<CameraPage>
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              Expanded(
-                child: _SensorCard(
-                  icon: Icons.accessibility_new_rounded,
-                  label: '비활동 감지',
-                  status: _hasInactivityAlert ? '감지됨' : '정상',
-                  isAlert: _hasInactivityAlert,
-                  count: _inactivityAlerts.length,
-                  gradient: _hasInactivityAlert
-                      ? const LinearGradient(colors: [Color(0xFFFEE2E2), Color(0xFFFEF2F2)])
-                      : const LinearGradient(colors: [Colors.white, Colors.white]),
-                  iconColor: _hasInactivityAlert ? const Color(0xFFDC2626) : const Color(0xFF2F6FEB),
-                ),
-              ),
-              const SizedBox(width: 8),
               Expanded(
                 child: _SensorCard(
                   icon: Icons.local_fire_department_rounded,

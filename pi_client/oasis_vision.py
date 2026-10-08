@@ -39,6 +39,8 @@ FALL_LYING_SEC   = float(os.getenv("OASIS_FALL_LYING_SEC", "2"))
 STREAM_PORT      = int(os.getenv("OASIS_STREAM_PORT", "5000"))
 ALERT_COOLDOWN   = float(os.getenv("OASIS_ALERT_COOLDOWN", "60"))
 NO_HAILO         = os.getenv("OASIS_NO_HAILO") == "1"
+# 비활동 감지: 수면·TV 시청 중 오작동 우려로 기본 끔. 다시 쓰려면 OASIS_INACTIVITY=1
+INACTIVITY_ON    = os.getenv("OASIS_INACTIVITY") == "1"
 
 def _dur(sec: float) -> str:
     """1800 → '30분', 30 → '30초'"""
@@ -249,7 +251,7 @@ def draw_overlay(frame, people, fall_now, idle_sec, inactive_sec):
         cv2.rectangle(frame, (int(bbox[0]), int(bbox[1])), (int(bbox[2]), int(bbox[3])), color, 2)
         cv2.putText(frame, status, (int(bbox[0]), max(int(bbox[1]) - 8, 20)),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
-    label = "FALL DETECTED" if fall_now else f"idle {int(idle_sec)}s / {int(inactive_sec)}s"
+    label = "FALL DETECTED" if fall_now else (f"idle {int(idle_sec)}s / {int(inactive_sec)}s" if INACTIVITY_ON else "")
     cv2.putText(frame, f"OASIS  {time.strftime('%H:%M:%S')}  {label}", (12, 28),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255) if fall_now else (255, 255, 255), 2)
     return frame
@@ -303,7 +305,7 @@ def run_hailo():
             if fall.update(pid, kp, bbox):
                 fall_now = True
                 alerts.send("낙상", "카메라에서 낙상이 감지되었어요. 어르신 상태를 확인해 주세요.", frame.copy())
-            if i == 0 and idle.update_keypoints(kp, bbox):
+            if INACTIVITY_ON and i == 0 and idle.update_keypoints(kp, bbox):
                 alerts.send("비활동", f"어르신이 {_dur(INACTIVE_SEC)} 넘게 움직이지 않으세요.", frame.copy())
             people.append((kp, bbox, fall.last_status.get(pid, "OK")))
         if not persons:
@@ -374,7 +376,7 @@ def run_opencv():
     hub, alerts, idle = FrameHub(), AlertSender(), InactivityDetector()
     mog = cv2.createBackgroundSubtractorMOG2(history=300, varThreshold=32, detectShadows=False)
     start_stream_server(hub)
-    print(f"[비상 모드] 낙상 감지 없음 / 백엔드 {BACKEND_URL} / 비활동 {INACTIVE_SEC}초")
+    print(f"[비상 모드] 홈캠만 동작 (낙상 감지 없음, 비활동 감지 {'켜짐' if INACTIVITY_ON else '꺼짐'}) / 백엔드 {BACKEND_URL}")
 
     while True:
         ok, frame = cap.read()
@@ -384,7 +386,7 @@ def run_opencv():
         small = cv2.resize(frame, (320, 180))
         mask = mog.apply(small)
         motion = float(np.count_nonzero(mask)) / mask.size
-        if idle.update_motion(motion):
+        if INACTIVITY_ON and idle.update_motion(motion):
             alerts.send("비활동", f"{_dur(INACTIVE_SEC)} 넘게 움직임이 없어요.", frame.copy())
         hub.push(draw_overlay(frame, [], False, idle.idle_seconds(), INACTIVE_SEC))
 

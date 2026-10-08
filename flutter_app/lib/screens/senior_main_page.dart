@@ -248,14 +248,13 @@ class _HomeTabState extends State<_HomeTab> {
         orElse: () => null);
 
     // 센서 알림 상태
-    final hasInactivity = _alerts.any((a) => a['type'] == '비활동' && a['status'] == '처리 중');
+    // 비활동 감지는 수면·TV 시청 오작동 우려로 사용하지 않음
     final hasGas        = _alerts.any((a) => a['type'] == '가스' && a['status'] == '처리 중');
     final hasFall       = _alerts.any((a) => a['type'] == '낙상' && a['status'] == '처리 중');
-    final anyAlert      = hasInactivity || hasGas || hasFall;
+    final anyAlert      = hasGas || hasFall;
     final alertText = [
       if (hasGas) '가스 누출',
       if (hasFall) '낙상',
-      if (hasInactivity) '장시간 움직임 없음',
     ].join(', ');
 
     // 인사말 — 보호자 뷰는 보호자 이름, 어르신 뷰는 어르신 이름
@@ -376,7 +375,6 @@ class _HomeTabState extends State<_HomeTab> {
                     Row(
                       children: [
                         _SensorDot(label: '가스', alert: hasGas, senior: s),
-                        _SensorDot(label: '움직임', alert: hasInactivity, senior: s),
                         _SensorDot(label: '낙상', alert: hasFall, senior: s),
                       ],
                     ),
