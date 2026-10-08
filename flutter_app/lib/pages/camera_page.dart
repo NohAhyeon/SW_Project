@@ -5,6 +5,28 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import '../data/api_service.dart';
 
 final String _streamUrl = dotenv.env['CAMERA_STREAM_URL'] ?? 'http://localhost:5000/';
+
+// iOS WebView(WebKit)는 이 서버의 MJPEG 연속 영상을 재생하지 못한다.
+// 그래서 /snapshot(사진 한 장)을 빠르게 이어 받아 보여준다. 새 사진이 다 받아진 뒤에 바꿔서 깜빡임이 없다.
+String get _snapshotUrl => _streamUrl.endsWith('/video')
+    ? _streamUrl.replaceFirst(RegExp(r'/video$'), '/snapshot')
+    : '${_streamUrl.replaceFirst(RegExp(r'/$'), '')}/snapshot';
+
+String get _streamHtml => '''
+<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#191F28}
+img{width:100%;height:100%;object-fit:cover;display:block}</style></head>
+<body><img id="v" alt="">
+<script>
+  var view = document.getElementById('v');
+  function next() {
+    var img = new Image();
+    img.onload = function () { view.src = img.src; setTimeout(next, 40); };
+    img.onerror = function () { setTimeout(next, 1000); };
+    img.src = '$_snapshotUrl?t=' + Date.now();
+  }
+  next();
+</script></body></html>''';
 const int _refreshInterval = 30;
 
 class CameraPage extends StatefulWidget {
@@ -102,7 +124,7 @@ class _CameraPageState extends State<CameraPage>
           if (mounted) setState(() => _isConnected = false);
         },
       ))
-      ..loadRequest(Uri.parse(_streamUrl));
+      ..loadHtmlString(_streamHtml, baseUrl: _streamUrl);
   }
 
   void _initAnimations() {
@@ -339,7 +361,7 @@ class _CameraPageState extends State<CameraPage>
           child: GestureDetector(
             onTap: _isConnected
                 ? null
-                : () => _webViewController.loadRequest(Uri.parse(_streamUrl)),
+                : () => _webViewController.loadHtmlString(_streamHtml, baseUrl: _streamUrl),
             child: AnimatedBuilder(
               animation: _pulseAnim,
               builder: (_, __) => Container(
