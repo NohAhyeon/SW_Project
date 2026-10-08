@@ -12,6 +12,7 @@ OASIS 노인 맞춤 대화 엔진
 LLM은 OpenAI 호환 API 하나로 호출하므로 Groq / Gemini / 라즈베리파이 llama.cpp 서버를
 주소와 모델 이름만 바꿔 쓸 수 있다. 설정은 .env 에서 읽는다 (.env.example 참고).
 """
+import asyncio
 import json
 import os
 import re
@@ -25,6 +26,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from crypto import decrypt, encrypt
+from database import AsyncSessionLocal
 from difflib import SequenceMatcher
 
 from models import Alert, Conversation, Medicine, Schedule, Setting, User
@@ -396,6 +398,7 @@ def _system_prompt(profile: dict, wake_name: str = DEFAULT_WAKE_NAME) -> str:
         "4. 병을 진단하거나 약을 바꾸라고 하지 마.",
         "5. 외롭거나 슬프다고 하시면 해결책보다 먼저 마음을 알아드리고, 짧은 질문으로 이야기를 이어가.",
         "6. 전화나 연락처럼 실제로 하지 않은 일을 했다고 말하지 마.",
+        "7. 어르신이 말하지 않은 일을 하셨다고 단정하지 마. 관심사와 기억은 참고만 하고 궁금하면 여쭤봐.",
         f"지금: {now.month}월 {now.day}일 {_korean_time(now.strftime('%H:%M'))}",
     ]
     if profile.get("관심사"):
@@ -467,6 +470,205 @@ async def _ask_llm(messages: list[dict]) -> tuple[str, str, int]:
 
 
 # ════════════════════════════════════════════════════════════
+#  돌봄 대화 기능
+#   ① "뭐라고?" → 직전 대답을 짧게, 천천히 다시
+#   ② 먼저 말 걸기: 약 시간 확인 / 아침 인사 / 기억 기반 안부  (파이가 30초마다 /talk/proactive 확인)
+#   ③ 장기기억: 대화 중 안부로 물어볼 만한 사실을 뽑아 저장 → 다음 대화·안부에 사용
+#   ④ 밤 시간(QUIET_START~QUIET_END)과 "조용히" 이후에는 먼저 말 걸지 않기
+#   ⑤ 보호자 일일 요약
+# ════════════════════════════════════════════════════════════
+REPEAT_RE   = re.compile(r"뭐라고|다시말해|다시한번|한번더말|못들었|잘안들|안들려|크게말|천천히말|뭐라했")
+QUIET_START = int(os.getenv("QUIET_START", "22"))      # 22시부터
+QUIET_END   = int(os.getenv("QUIET_END", "7"))         # 아침 7시까지는 먼저 말 걸지 않음
+MUTE_SEC    = 2 * 60 * 60                              # "조용히" 하면 2시간 동안 먼저 말 걸지 않음
+MED_ASK_WINDOW_MIN = 60                                # 약 시간부터 60분 안에 한 번 여쭤봄
+
+_last_reply: dict[str, str] = {}
+_muted_until: dict[str, float] = {}
+_pending_med: dict[str, int] = {}                      # 세션 → "약 드셨어요?" 라고 여쭤본 약 id
+_proactive_done: set[tuple] = set()                    # (어르신, 날짜, 종류[, 약 id]) 오늘 이미 한 것
+
+MEMORY_HINT_RE = re.compile(r"아프|아파|병원|수술|약|손녀|손자|아들|딸|며느리|사위|가족|친구|외롭|슬프|"
+                            r"우울|기분|잠|못잤|밥|산책|생일|제사|모임|여행|온대|온다|간대|간다|약속|넘어|다쳤")
+POSITIVE = ["좋아", "좋다", "기쁘", "행복", "고마", "재밌", "맛있", "신나", "반가"]
+NEGATIVE = ["외롭", "슬프", "아프", "아파", "힘들", "우울", "속상", "무서", "걱정", "못잤", "심심"]
+
+
+def _short(text: str, n: int = 2) -> str:
+    parts = re.split(r"(?<=[.!?요다])\s+", text.strip())
+    return " ".join(parts[:n])
+
+
+def _is_quiet(now: datetime | None = None) -> bool:
+    h = (now or datetime.now()).hour
+    return h >= QUIET_START or h < QUIET_END
+
+
+# ── 장기기억 (settings 테이블 key = "memory:<어르신id>", JSON 목록) ──
+async def load_memories(db: AsyncSession, senior_id: int) -> list[dict]:
+    res = await db.execute(select(Setting).where(Setting.key == f"memory:{senior_id}"))
+    row = res.scalar_one_or_none()
+    try:
+        return json.loads(row.value) if row and row.value else []
+    except ValueError:
+        return []
+
+
+async def save_memories(db: AsyncSession, senior_id: int, items: list[dict]) -> None:
+    key = f"memory:{senior_id}"
+    res = await db.execute(select(Setting).where(Setting.key == key))
+    row = res.scalar_one_or_none()
+    value = json.dumps(items[-30:], ensure_ascii=False)     # 최근 30개만 유지
+    if row:
+        row.value = value
+    else:
+        db.add(Setting(key=key, value=value))
+    await db.commit()
+
+
+async def _extract_memory(text: str) -> str | None:
+    """어르신 말에서 나중에 안부로 여쭐 만한 사실을 '~하셨어요.' 한 문장으로 뽑는다"""
+    prompt = ("아래는 어르신이 한 말이야. 며칠 뒤 안부를 여쭐 때 쓸 만한 사실(건강 상태, 가족·지인 소식, "
+              "약속·계획, 기분)이 있으면 '무릎이 아프다고 하셨어요.' 처럼 '~하셨어요.' 로 끝나는 짧은 한 문장으로 써. "
+              "없으면 '없음' 이라고만 써.\n어르신: " + text)
+    fact, _, _ = await _ask_llm([{"role": "user", "content": prompt}])
+    fact = fact.strip().strip('"').split("\n")[0]
+    if not fact or "없음" in fact or fact == MSG_LLM_FAIL or len(fact) < 6:
+        return None
+    return fact
+
+
+async def _remember_later(senior_id: int, text: str) -> None:
+    """대답을 먼저 돌려준 뒤 뒤에서 조용히 기억을 저장 (응답 속도에 영향 없음)"""
+    try:
+        fact = await _extract_memory(text)
+        if not fact:
+            return
+        async with AsyncSessionLocal() as db:
+            items = await load_memories(db, senior_id)
+            if any(m["fact"] == fact for m in items):
+                return
+            items.append({"fact": fact, "date": datetime.now().strftime("%Y-%m-%d")})
+            await save_memories(db, senior_id, items)
+            print(f"[기억 저장] {fact}")
+    except Exception as e:
+        print(f"[기억 저장 실패] {e}")
+
+
+# ── 먼저 말 걸기 ─────────────────────────────────────────────
+async def _profile_for(db: AsyncSession, senior_id: int) -> dict:
+    res = await db.execute(select(User).where(User.id == senior_id))
+    return _load_profile(senior_id, res.scalar_one_or_none())
+
+
+async def proactive(db: AsyncSession, session_id: str, senior_id: int, force: str | None = None) -> dict:
+    """기기가 30초마다 호출. 지금 먼저 할 말이 있으면 say 에 담아 준다.
+    force: 'med' | 'morning' | 'checkin' — 시연용으로 시간 조건을 무시하고 바로 실행"""
+    now = datetime.now()
+    today = now.strftime("%Y-%m-%d")
+    if not force and (_is_quiet(now) or time.time() < _muted_until.get(session_id, 0)):
+        return {"say": None, "kind": None, "reason": "quiet"}
+    profile = await _profile_for(db, senior_id)
+    who = profile["호칭"]
+    say, kind = None, None
+
+    # 1) 약 시간: 복용 시간이 지났고(60분 안) 아직 안 드신 약
+    if force in (None, "med"):
+        now_min = now.hour * 60 + now.minute
+        for m in await _my_meds(db, senior_id):
+            due = _hhmm_minutes((m.alarm_times or "").split(",")[0])
+            if m.taken or due is None or (senior_id, today, "med", m.id) in _proactive_done:
+                continue
+            if force == "med" or 0 <= now_min - due <= MED_ASK_WINDOW_MIN:
+                _proactive_done.add((senior_id, today, "med", m.id))
+                _pending_med[session_id] = m.id
+                say, kind = f"{who}, {m.name} 드실 시간이에요. 드셨어요?", "med"
+                break
+
+    # 2) 아침 인사 (7~11시, 하루 한 번) + 오늘 일정
+    if not say and force in (None, "morning") and \
+            (force == "morning" or (7 <= now.hour < 11 and (senior_id, today, "morning") not in _proactive_done)):
+        _proactive_done.add((senior_id, today, "morning"))
+        sched = await _answer_sched_query(db, senior_id, "오늘")
+        say, kind = f"좋은 아침이에요, {who}! 잘 주무셨어요? {sched}", "morning"
+
+    # 3) 기억 기반 안부 (13~20시, 하루 한 번, 오늘 이전에 저장된 기억)
+    if not say and force in (None, "checkin") and \
+            (force == "checkin" or (13 <= now.hour < 20 and (senior_id, today, "checkin") not in _proactive_done)):
+        past = [m for m in await load_memories(db, senior_id) if force == "checkin" or m["date"] < today]
+        if past:
+            _proactive_done.add((senior_id, today, "checkin"))
+            health = [m for m in past if re.search(r"아프|아파|병원|잠|못잤|기분|힘들|어지러|다쳤|넘어", m["fact"])]
+            pick = (health or past)[-1]["fact"]
+            ask = "오늘은 좀 어떠세요?" if health else "어떻게 되셨는지 궁금해요."
+            say, kind = f"{who}, 지난번에 {pick} {ask}", "checkin"
+
+    if say:
+        _awake_until[session_id] = time.time() + WAKE_WINDOW_SEC    # 이름 없이 바로 대답하실 수 있게
+        _last_reply[session_id] = say
+        await _save(db, session_id, senior_id, "assistant", say, "복약" if kind == "med" else "생활정보")
+    return {"say": say, "kind": kind}
+
+
+# ── 보호자 일일 요약 ─────────────────────────────────────────
+_summary_cache: dict[tuple, tuple] = {}
+
+
+async def daily_summary(db: AsyncSession, senior_id: int, day: str | None = None) -> dict:
+    day = day or datetime.now().strftime("%Y-%m-%d")
+    res = await db.execute(select(Conversation).where(
+        or_(Conversation.senior_id == senior_id, Conversation.senior_id.is_(None))).order_by(Conversation.id))
+    convs = [c for c in res.scalars().all() if str(c.created_at or "").startswith(day)]
+    said = []
+    for c in convs:
+        if c.role == "user":
+            try:
+                said.append(decrypt(c.content))
+            except Exception:
+                pass
+    topics: dict[str, int] = {}
+    for c in convs:
+        if c.role == "user":
+            topics[c.type or "생활정보"] = topics.get(c.type or "생활정보", 0) + 1
+    joined = _norm(" ".join(said))
+    pos, neg = sum(joined.count(w) for w in POSITIVE), sum(joined.count(w) for w in NEGATIVE)
+    mood = "대화 없음" if not said else ("좋아 보여요" if pos > neg else "살펴봐 주세요" if neg > pos else "보통이에요")
+
+    meds = await _my_meds(db, senior_id)
+    res = await db.execute(select(Alert))
+    urgent = [a for a in res.scalars().all()
+              if str(a.created_at or "").startswith(day) and a.type in ("긴급", "위급", "가스감지", "가스", "낙상")]
+    memories = [m["fact"] for m in await load_memories(db, senior_id) if m["date"] == day]
+
+    # 한두 문장 요약 (대화 수가 바뀔 때만 다시 만든다)
+    key = (senior_id, day)
+    if key in _summary_cache and _summary_cache[key][0] == len(said):
+        text = _summary_cache[key][1]
+    elif said:
+        prompt = ("아래는 오늘 어르신이 AI 말벗에게 한 말들이야. 보호자에게 전하듯 어르신의 하루와 기분을 "
+                  "존댓말 두 문장 이내로 요약해. 진단하지 말고, 없는 내용은 지어내지 마.\n- " + "\n- ".join(said[-30:]))
+        text, _, _ = await _ask_llm([{"role": "user", "content": prompt}])
+        if text == MSG_LLM_FAIL:
+            text = f"오늘 {len(said)}번 대화하셨어요."
+        _summary_cache[key] = (len(said), text)
+    else:
+        text = "오늘은 아직 대화가 없어요."
+
+    return {
+        "date": day,
+        "talk_count": len(said),
+        "topics": topics,
+        "mood": mood,
+        "med_taken": sum(1 for m in meds if m.taken),
+        "med_total": len(meds),
+        "urgent_count": len(urgent),
+        "new_memories": memories,
+        "summary": text,
+        "wake_name": await get_wake_name(db),
+    }
+
+
+# ════════════════════════════════════════════════════════════
 #  메인 진입점
 # ════════════════════════════════════════════════════════════
 async def _save(db: AsyncSession, session_id: str, senior_id: int, role: str, text: str, ctype: str):
@@ -500,7 +702,8 @@ async def reply(db: AsyncSession, text: str, session_id: str, senior_id: int,
     # ── 호출어: 이름을 부른 말에만 대답 ─────────────────────
     wake_name = await get_wake_name(db)
     if require_wake:
-        awake = time.time() < _awake_until.get(session_id, 0) or session_id in _pending_confirm
+        awake = (time.time() < _awake_until.get(session_id, 0) or session_id in _pending_confirm
+                 or session_id in _pending_med)      # 먼저 여쭤본 질문에는 이름 없이 대답 가능
         urgent = _has(EMERGENCY_WORDS, t) and "뻔" not in t
         found = find_wake_name(t, wake_name)
         if not (awake or found or urgent):
@@ -527,6 +730,8 @@ async def reply(db: AsyncSession, text: str, session_id: str, senior_id: int,
                     "llm_ms": 0}
         if _has(END_WORDS, t) and len(t) <= 8:   # "그만", "잘 자" → 대화 끝
             _awake_until.pop(session_id, None)
+            if "조용히" in t or "잘자" in t:          # 먼저 말 걸기도 잠시 멈춤
+                _muted_until[session_id] = time.time() + MUTE_SEC
             answer = f"네, 필요하시면 '{_calling(wake_name)}' 하고 불러 주세요."
             await _save(db, session_id, senior_id, "user", text, ctype)
             await _save(db, session_id, senior_id, "assistant", answer, ctype)
@@ -534,9 +739,32 @@ async def reply(db: AsyncSession, text: str, session_id: str, senior_id: int,
                     "wake_name": wake_name, "latency_ms": int((time.perf_counter() - started) * 1000),
                     "llm_ms": 0}
 
-    # 0) 직전에 "보호자분께 알릴까요?"라고 여쭤본 경우
+    # 다시 말해 달라고 하시면 → 직전 대답을 짧게, 천천히
+    if REPEAT_RE.search(t) and len(t) <= 15 and session_id in _last_reply:
+        answer = _short(_last_reply[session_id])
+        await _save(db, session_id, senior_id, "user", text, ctype)
+        await _save(db, session_id, senior_id, "assistant", answer, ctype)
+        _awake_until[session_id] = time.time() + WAKE_WINDOW_SEC
+        return {"respond": True, "reply": answer, "intent": "repeat", "source": "rule",
+                "speak_rate": "slow", "wake_name": wake_name,
+                "latency_ms": int((time.perf_counter() - started) * 1000), "llm_ms": 0}
+
+    # 0) 직전에 "보호자분께 알릴까요?" / "약 드셨어요?" 라고 여쭤본 경우
+    med_pending = _pending_med.pop(session_id, None)
     pending = _pending_confirm.pop(session_id, None)
-    if pending and (t in YES_EXACT or _has(YES_WORDS, t)) and not _has(NO_WORDS, t):
+    said_no = _has(["아직", "안먹", "아니", "깜빡", "까먹"], t)
+    if med_pending and not said_no and (t in YES_EXACT or "먹었" in t or "드셨" in t
+                                        or t.startswith(("응", "네", "어", "그래", "예"))):
+        med = next((m for m in await _my_meds(db, senior_id) if m.id == med_pending), None)
+        if med:
+            med.taken = True
+            await db.commit()
+        intent, ctype, source = "med_taken", "복약", "db"
+        answer = f"잘하셨어요! {med.name if med else '약'} 드신 걸로 기록해 둘게요."
+    elif med_pending and said_no:
+        intent, ctype = "med_not_yet", "복약"
+        answer = "지금 드시면 좋겠어요. 드시고 나서 '먹었어' 하고 말씀해 주세요."
+    elif pending and (t in YES_EXACT or _has(YES_WORDS, t)) and not _has(NO_WORDS, t):
         await _raise_alert(db, senior_id, pending["text"])
         intent, ctype = "emergency_confirmed", "긴급"
         answer = "보호자분 앱으로 알림을 보냈어요. 편한 자세로 쉬고 계세요."
@@ -584,6 +812,9 @@ async def reply(db: AsyncSession, text: str, session_id: str, senior_id: int,
     else:
         res = await db.execute(select(User).where(User.id == senior_id))
         profile = _load_profile(senior_id, res.scalar_one_or_none())
+        recent_mem = [m["fact"] for m in (await load_memories(db, senior_id))[-5:]]
+        if recent_mem:
+            profile["기억"] = " / ".join(filter(None, [profile.get("기억"), *recent_mem]))
         messages = ([{"role": "system", "content": _system_prompt(profile, wake_name)}]
                     + await _recent_turns(db, session_id)
                     + [{"role": "user", "content": text}])
@@ -593,9 +824,14 @@ async def reply(db: AsyncSession, text: str, session_id: str, senior_id: int,
     await _save(db, session_id, senior_id, "assistant", answer, ctype)
     if require_wake:                             # 대답한 뒤에는 이름 없이 이어서 말해도 됨
         _awake_until[session_id] = time.time() + WAKE_WINDOW_SEC
+    _last_reply[session_id] = answer
+    # 기억할 만한 말(건강·가족·약속·기분)이면 대답을 먼저 돌려준 뒤 뒤에서 저장
+    if intent in ("chat", "symptom_check", "emergency", "emergency_declined") and MEMORY_HINT_RE.search(t):
+        asyncio.create_task(_remember_later(senior_id, text))
 
     return {
         "respond": True,
+        "speak_rate": "normal",
         "wake_name": wake_name,
         "reply": answer,
         "intent": intent,

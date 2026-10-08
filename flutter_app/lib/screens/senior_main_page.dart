@@ -206,6 +206,7 @@ class _HomeTabState extends State<_HomeTab> {
   List<Map> _scheds = [];
   List<Map> _alerts = [];
   Map<String, dynamic>? _weather;
+  Map<String, dynamic>? _summary;
   bool _loading = true;
 
   @override
@@ -228,6 +229,9 @@ class _HomeTabState extends State<_HomeTab> {
       _meds = meds; _scheds = scheds; _weather = weather;
       _alerts = alerts; _loading = false;
     });
+    // 요약은 AI가 만들어서 조금 걸리므로 화면을 먼저 보여준 뒤 채운다
+    final summary = await ApiService.getDailySummary();
+    if (mounted) setState(() => _summary = summary);
   }
 
   @override
@@ -382,6 +386,9 @@ class _HomeTabState extends State<_HomeTab> {
                 ),
               ),
 
+              // ── 오늘의 어르신 (보호자 화면: 대화 엔진 일일 요약) ──
+              if (!s && _summary != null) _DailySummaryCard(data: _summary!),
+
               // ── 2. 오늘 챙길 것 ─────────────────────────
               _HomeCard(
                 padding: const EdgeInsets.fromLTRB(22, 22, 22, 10),
@@ -480,6 +487,76 @@ class _HomeTabState extends State<_HomeTab> {
       case 'Mist': case 'Fog': case 'Haze': return '🌫️';
       default:             return '🌤️';
     }
+  }
+}
+
+// 이름 + 이/가 (복실 → 복실이, 지니 → 지니가)
+String _withSubject(String name) {
+  if (name.isEmpty) return name;
+  final code = name.codeUnitAt(name.length - 1) - 0xAC00;
+  return name + ((code >= 0 && code < 11172 && code % 28 != 0) ? '이' : '가');
+}
+
+// ── 오늘의 어르신 카드: 대화 횟수·기분·복약 + AI 한두 문장 요약 + 새로 기억한 것
+class _DailySummaryCard extends StatelessWidget {
+  final Map<String, dynamic> data;
+  const _DailySummaryCard({required this.data});
+
+  @override
+  Widget build(BuildContext context) {
+    final mood = data['mood']?.toString() ?? '';
+    final moodWarn = mood.contains('살펴');
+    final memories = (data['new_memories'] as List? ?? []).cast<dynamic>();
+    Widget chip(IconData icon, String text, {bool warn = false}) => Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: warn ? _dangerSoft : _bg,
+            borderRadius: BorderRadius.circular(99),
+          ),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Icon(icon, size: 16, color: warn ? _danger : _text2),
+            const SizedBox(width: 6),
+            Text(text, style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700,
+                color: warn ? _danger : _text1)),
+          ]),
+        );
+    return _HomeCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('오늘의 어르신',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, letterSpacing: -0.3, color: _text1)),
+          const SizedBox(height: 10),
+          Text(data['summary']?.toString() ?? '',
+              style: const TextStyle(fontSize: 15, height: 1.55, color: _text2)),
+          const SizedBox(height: 14),
+          Wrap(spacing: 8, runSpacing: 8, children: [
+            chip(Icons.forum_rounded, '대화 ${data['talk_count'] ?? 0}회'),
+            chip(moodWarn ? Icons.sentiment_dissatisfied_rounded : Icons.sentiment_satisfied_rounded,
+                '기분 $mood', warn: moodWarn),
+            chip(Icons.medication_rounded, '복약 ${data['med_taken'] ?? 0}/${data['med_total'] ?? 0}'),
+            if ((data['urgent_count'] ?? 0) > 0)
+              chip(Icons.warning_amber_rounded, '긴급 ${data['urgent_count']}건', warn: true),
+          ]),
+          if (memories.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            Container(height: 1, color: _line),
+            const SizedBox(height: 12),
+            Text('${_withSubject(data['wake_name']?.toString() ?? '오아시스')} 기억해 둔 것',
+                style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700, color: _text3)),
+            const SizedBox(height: 6),
+            ...memories.take(3).map((m) => Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    const Text('•  ', style: TextStyle(color: _brand, fontWeight: FontWeight.w800)),
+                    Expanded(child: Text(m.toString(),
+                        style: const TextStyle(fontSize: 14, color: _text1, height: 1.4))),
+                  ]),
+                )),
+          ],
+        ],
+      ),
+    );
   }
 }
 

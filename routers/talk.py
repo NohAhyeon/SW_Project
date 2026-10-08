@@ -55,3 +55,29 @@ async def put_wake_name(body: WakeNameUpdate, db: AsyncSession = Depends(get_db)
 async def delete_wake_name(db: AsyncSession = Depends(get_db)):
     await elder_engine.reset_wake_name(db)
     return {"message": "이름을 지웠어요. 다음에 말을 걸면 이름을 다시 여쭤봐요."}
+
+
+# 먼저 말 걸기: 기기가 30초마다 호출 → say 가 있으면 말한다
+#   force=med|morning|checkin : 시연용으로 시간 조건 없이 바로 실행
+@router.get("/proactive")
+async def get_proactive(session_id: str = "oasis-device-1", senior_id: int = 4,
+                        force: str | None = None, db: AsyncSession = Depends(get_db)):
+    return await elder_engine.proactive(db, session_id, senior_id, force)
+
+
+# 보호자 일일 요약 (앱 홈 화면)
+@router.get("/summary")
+async def get_summary(senior_id: int = 4, date: str | None = None, db: AsyncSession = Depends(get_db)):
+    return await elder_engine.daily_summary(db, senior_id, date)
+
+
+# 장기기억 목록 / 지우기 (보호자 확인용)
+@router.get("/memories")
+async def get_memories(senior_id: int = 4, db: AsyncSession = Depends(get_db)):
+    return {"memories": await elder_engine.load_memories(db, senior_id)}
+
+
+@router.delete("/memories")
+async def delete_memories(senior_id: int = 4, db: AsyncSession = Depends(get_db)):
+    await elder_engine.save_memories(db, senior_id, [])
+    return {"message": "기억을 모두 지웠어요."}

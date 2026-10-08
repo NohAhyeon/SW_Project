@@ -280,6 +280,20 @@ class ApiService {
     }
   }
 
+  // ===== 보호자 일일 요약 (대화 엔진) =====
+  static Future<Map<String, dynamic>?> getDailySummary({int seniorId = 4}) async {
+    try {
+      final res = await http.get(Uri.parse('$baseUrl/talk/summary?senior_id=$seniorId'))
+          .timeout(const Duration(seconds: 20));
+      if (res.statusCode == 200) {
+        return Map<String, dynamic>.from(jsonDecode(utf8.decode(res.bodyBytes)));
+      }
+    } catch (e) {
+      print('일일 요약 조회 오류: $e');
+    }
+    return null;
+  }
+
   static Future<List<Map>> getAlerts() async {
     if (_useMock) return [
       {"time": "2026-06-22T08:00:00", "content": "비활동 감지", "status": "처리 완료", "type": "비활동", "id": 1},
