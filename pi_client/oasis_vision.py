@@ -315,14 +315,49 @@ def run_hailo():
 # ════════════════════════════════════════════════════════════
 #  비상 모드 (AI HAT 없이: 홈캠 + 움직임 기반 비활동 감지)
 # ════════════════════════════════════════════════════════════
+def find_usb_camera(base="/sys/class/video4linux"):
+    """라즈베리파이5는 /dev/video0~ 를 자체 영상 장치가 쓰므로, 이름으로 USB 웹캠을 찾는다.
+    OASIS_CAMERA 를 지정하면 그 번호를 쓴다."""
+    if os.getenv("OASIS_CAMERA"):
+        return [int(os.getenv("OASIS_CAMERA"))]
+    usb, others = [], []
+
+    for name in sorted(os.listdir(base) if os.path.isdir(base) else [], key=lambda n: int(n[5:] or 0)):
+        try:
+            label = open(f"{base}/{name}/name").read().strip()
+        except OSError:
+            continue
+        idx = int(name.replace("video", ""))
+        lower = label.lower()
+        if any(k in lower for k in ("usb", "webcam", "camera", "uvc")) and \
+                not any(k in lower for k in ("rp1-cfe", "pispbe", "hevc", "codec", "isp")):
+            usb.append(idx)
+            print(f"  [카메라 후보] /dev/video{idx}: {label}")
+        else:
+            others.append(idx)
+    return usb or [0]
+
+
+def open_camera():
+    for idx in find_usb_camera():
+        cap = cv2.VideoCapture(idx, cv2.CAP_V4L2)
+        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+        ok, _ = cap.read() if cap.isOpened() else (False, None)
+        if ok:
+            print(f"[카메라] /dev/video{idx} 사용")
+            return cap
+        cap.release()
+        print(f"  /dev/video{idx} 는 영상을 못 받았어요 (다른 프로그램이 쓰는 중이거나 영상 장치가 아님)")
+    sys.exit("USB 웹캠을 열 수 없어요.\n"
+             "  1) v4l2-ctl --list-devices 로 웹캠 번호 확인 → OASIS_CAMERA=번호 로 지정\n"
+             "  2) 다른 프로그램(camera_stream.py 등)이 카메라를 쓰고 있지 않은지 확인\n"
+             "  3) 웹캠을 뺐다 다시 꽂기")
+
+
 def run_opencv():
-    cam_index = int(os.getenv("OASIS_CAMERA", "0"))
-    cap = cv2.VideoCapture(cam_index, cv2.CAP_V4L2)
-    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
-    if not cap.isOpened():
-        sys.exit(f"카메라 /dev/video{cam_index} 를 열 수 없어요. 'v4l2-ctl --list-devices' 로 번호를 확인하세요.")
+    cap = open_camera()
 
     hub, alerts, idle = FrameHub(), AlertSender(), InactivityDetector()
     mog = cv2.createBackgroundSubtractorMOG2(history=300, varThreshold=32, detectShadows=False)
