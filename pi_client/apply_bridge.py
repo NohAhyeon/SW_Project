@@ -37,7 +37,7 @@ def main():
 
     # 2) 대답 부분 교체: save_message("user", ...) 부터 speak(ai_answer) 까지
     pattern = re.compile(
-        r'(?P<indent>[ \t]*)save_message\("user",\s*text\)\s*\n'
+        r'(?P<indent>[ \t]*)save_message(?:_async)?\("user",\s*text\)\s*\n'
         r'(?P<body>(?:.*\n)*?)'
         r'(?P=indent)speak\(ai_answer\)[ \t]*\n')
     m = pattern.search(s)
@@ -51,7 +51,7 @@ def main():
     elif "bridge.handle(" in s:
         done.append("② 대답 부분 (이미 교체됨)")
     else:
-        missed.append("② 대답 부분 (save_message(\"user\", text) ~ speak(ai_answer) 를 못 찾음)")
+        missed.append("② 대답 부분 (save_message(_async)(\"user\", text) ~ speak(ai_answer) 를 못 찾음)")
     s = re.sub(r'if text and len\(text\) > 2:', 'if text and len(text) > 1:', s)
 
     # 3) 천천히 말하기
@@ -64,14 +64,34 @@ def main():
     else:
         missed.append("③ def speak(text): 를 못 찾음")
 
-    # 4) 먼저 말 걸기
-    if "start_proactive" not in s:
-        s, n = re.subn(r'^(?P<i>[ \t]*)(?P<v>\w+)\.daemon = True\s*\n(?P=i)(?P=v)\.start\(\)[ \t]*\n',
-                       lambda mm: mm.group(0) + f"{mm.group('i')}bridge.start_proactive(speak, is_busy=lambda: is_speaking)\n",
-                       s, count=1, flags=re.M)
-        (done if n else missed).append("④ 먼저 말 걸기 시작")
+    # 4) 먼저 말 걸기: main() 안의 첫 스레드 시작(.start()) 바로 다음에 한 번만
+    #    (이전 버전 스크립트가 다른 함수 안에 잘못 넣은 줄이 있으면 지운다)
+    lines = s.split("\n")
+    main_at = next((i for i, l in enumerate(lines) if re.match(r"def main\(", l)), None)
+    def in_main(i):
+        if main_at is None or i <= main_at:
+            return False
+        nxt = next((j for j in range(main_at + 1, len(lines)) if re.match(r"(def |class |if __name__)", lines[j])), len(lines))
+        return i < nxt
+    wrong = [i for i, l in enumerate(lines) if "bridge.start_proactive" in l and not in_main(i)]
+    for i in reversed(wrong):
+        del lines[i]
+    if wrong:
+        done.append(f"④ 잘못된 위치의 먼저 말 걸기 {len(wrong)}줄 제거")
+        if main_at is not None and main_at > wrong[0]:
+            main_at -= len([w for w in wrong if w < main_at])
+    if not any("bridge.start_proactive" in l for l in lines):
+        start_at = next((i for i in range(main_at + 1 if main_at is not None else 0, len(lines))
+                         if re.search(r"\.start\(\)\s*$", lines[i]) and in_main(i)), None)
+        if start_at is not None:
+            ind = re.match(r"[ \t]*", lines[start_at]).group(0)
+            lines.insert(start_at + 1, f"{ind}bridge.start_proactive(speak, is_busy=lambda: is_speaking)")
+            done.append("④ 먼저 말 걸기 시작 (main 안)")
+        else:
+            missed.append("④ main() 안에서 스레드 시작(.start()) 줄을 못 찾음")
     else:
-        done.append("④ 먼저 말 걸기 (이미 있음)")
+        done.append("④ 먼저 말 걸기 (이미 main 안에 있음)")
+    s = "\n".join(lines)
 
     if s == src:
         print("바꿀 곳이 없어요 (이미 연결되어 있음)")
