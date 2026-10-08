@@ -220,13 +220,21 @@ def start_stream_server(hub: FrameHub, port=STREAM_PORT):
         jpg = hub.latest(0.5)
         return Response(jpg or b"", mimetype="image/jpeg")
 
+    @app.route("/view")
+    def view():
+        # 앱(WebView)용: 화면에 꽉 차게 실시간 영상만 보여주는 페이지
+        return ("<!doctype html><html><head><meta name='viewport' content='width=device-width,initial-scale=1'>"
+                "<style>html,body{margin:0;height:100%;background:#191F28}"
+                "img{width:100%;height:100%;object-fit:cover;display:block}</style></head>"
+                "<body><img src='/video' alt=''></body></html>")
+
     @app.route("/")
     def health():
         return {"status": "ok", "mode": "no-hailo" if NO_HAILO else "hailo"}
 
     threading.Thread(target=lambda: app.run(host="0.0.0.0", port=port, threaded=True),
                      daemon=True).start()
-    print(f"[홈캠] http://<파이IP>:{port}/video 에서 실시간 영상 제공")
+    print(f"[홈캠] http://<파이IP>:{port}/view (앱용 화면), /video (영상 원본)")
 
 
 # ════════════════════════════════════════════════════════════
