@@ -2528,10 +2528,13 @@ class _LogTabState extends State<_LogTab> {
                 color: Colors.white.withOpacity(0.75),
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: Text(
-                '오아시스의 답변은 AI가 생성한 내용이에요',
-                textAlign: TextAlign.center,
-                style: TextStyle(fontSize: s ? 15 : 12, color: _text3, fontWeight: FontWeight.w500),
+              child: ValueListenableBuilder<String?>(
+                valueListenable: wakeNameNotifier,
+                builder: (_, name, __) => Text(
+                  '${name ?? '오아시스'}의 답변은 AI가 생성한 내용이에요',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: s ? 15 : 12, color: _text3, fontWeight: FontWeight.w500),
+                ),
               ),
             ),
             Expanded(

@@ -898,6 +898,7 @@ async def _save(db: AsyncSession, session_id: str, senior_id: int, role: str, te
 async def reply(db: AsyncSession, text: str, session_id: str, senior_id: int,
                 require_wake: bool = True) -> dict:
     started = time.perf_counter()
+    said = text                                  # 기록에는 어르신이 하신 말 그대로 ("철수야 반갑다")
     std = dialect.normalize(text)                # 사투리 → 표준어 (규칙 판단용, 저장·LLM 에는 원래 말)
     t = _norm(std)
     intent, ctype, source, llm_ms = "chat", "생활정보", "rule", 0
@@ -908,7 +909,7 @@ async def reply(db: AsyncSession, text: str, session_id: str, senior_id: int,
         first_time = require_wake and not await is_wake_name_set(db)
         undo = await _maybe_undo_name(db, session_id, t)
         if undo:
-            await _save(db, session_id, senior_id, "user", text, "생활정보")
+            await _save(db, session_id, senior_id, "user", said, "생활정보")
             await _save(db, session_id, senior_id, "assistant", undo, "생활정보")
             return {"respond": True, "reply": undo, "intent": "naming", "source": "rule",
                     "wake_name": await get_wake_name(db),
@@ -922,7 +923,7 @@ async def reply(db: AsyncSession, text: str, session_id: str, senior_id: int,
                 answer = "안녕하세요! 저를 뭐라고 불러 주실래요? 부르기 편한 이름을 지어 주세요."
             else:
                 answer = await _naming_step(db, session_id, t, text)
-            await _save(db, session_id, senior_id, "user", text, "생활정보")
+            await _save(db, session_id, senior_id, "user", said, "생활정보")
             await _save(db, session_id, senior_id, "assistant", answer, "생활정보")
             return {"respond": True, "reply": answer, "intent": "naming", "source": "rule",
                     "wake_name": await get_wake_name(db),
@@ -948,6 +949,7 @@ async def reply(db: AsyncSession, text: str, session_id: str, senior_id: int,
             if len(t) < 2:                       # 이름만 불렀을 때
                 _awake_until[session_id] = time.time() + WAKE_WINDOW_SEC
                 answer = "네, 말씀하세요."
+                await _save(db, session_id, senior_id, "user", said, ctype)
                 await _save(db, session_id, senior_id, "assistant", answer, ctype)
                 return {"respond": True, "reply": answer, "intent": "wake", "source": "rule",
                         "wake_name": wake_name, "latency_ms": int((time.perf_counter() - started) * 1000),
@@ -959,7 +961,7 @@ async def reply(db: AsyncSession, text: str, session_id: str, senior_id: int,
             except ValueError:
                 _naming[session_id] = {"stage": "ask", "at": time.time()}
                 answer = "좋아요. 그럼 뭐라고 불러 주실래요?"
-            await _save(db, session_id, senior_id, "user", text, ctype)
+            await _save(db, session_id, senior_id, "user", said, ctype)
             await _save(db, session_id, senior_id, "assistant", answer, ctype)
             return {"respond": True, "reply": answer, "intent": "naming", "source": "rule",
                     "wake_name": wake_name, "latency_ms": int((time.perf_counter() - started) * 1000),
@@ -967,7 +969,7 @@ async def reply(db: AsyncSession, text: str, session_id: str, senior_id: int,
         if RENAME_RE.search(t):                  # "네 이름 바꾸고 싶어"
             _naming[session_id] = {"stage": "ask", "at": time.time()}
             answer = "좋아요. 그럼 뭐라고 불러 주실래요?"
-            await _save(db, session_id, senior_id, "user", text, ctype)
+            await _save(db, session_id, senior_id, "user", said, ctype)
             await _save(db, session_id, senior_id, "assistant", answer, ctype)
             return {"respond": True, "reply": answer, "intent": "naming", "source": "rule",
                     "wake_name": wake_name, "latency_ms": int((time.perf_counter() - started) * 1000),
@@ -977,7 +979,7 @@ async def reply(db: AsyncSession, text: str, session_id: str, senior_id: int,
             if "조용히" in t or "잘자" in t:          # 먼저 말 걸기도 잠시 멈춤
                 _muted_until[session_id] = time.time() + MUTE_SEC
             answer = f"네, 필요하시면 '{_calling(wake_name)}' 하고 불러 주세요."
-            await _save(db, session_id, senior_id, "user", text, ctype)
+            await _save(db, session_id, senior_id, "user", said, ctype)
             await _save(db, session_id, senior_id, "assistant", answer, ctype)
             return {"respond": True, "reply": answer, "intent": "sleep", "source": "rule",
                     "wake_name": wake_name, "latency_ms": int((time.perf_counter() - started) * 1000),
@@ -986,7 +988,7 @@ async def reply(db: AsyncSession, text: str, session_id: str, senior_id: int,
     # 다시 말해 달라고 하시면 → 직전 대답을 짧게, 천천히
     if REPEAT_RE.search(t) and len(t) <= 15 and session_id in _last_reply:
         answer = _short(_last_reply[session_id])
-        await _save(db, session_id, senior_id, "user", text, ctype)
+        await _save(db, session_id, senior_id, "user", said, ctype)
         await _save(db, session_id, senior_id, "assistant", answer, ctype)
         _awake_until[session_id] = time.time() + WAKE_WINDOW_SEC
         return {"respond": True, "reply": answer, "intent": "repeat", "source": "rule",
@@ -1088,7 +1090,7 @@ async def reply(db: AsyncSession, text: str, session_id: str, senior_id: int,
                     + [{"role": "user", "content": text}])
         answer, source, llm_ms = await _ask_llm(messages)
 
-    await _save(db, session_id, senior_id, "user", text, ctype)
+    await _save(db, session_id, senior_id, "user", said, ctype)
     await _save(db, session_id, senior_id, "assistant", answer, ctype)
     if require_wake:                             # 대답한 뒤에는 이름 없이 이어서 말해도 됨
         _awake_until[session_id] = time.time() + WAKE_WINDOW_SEC
