@@ -103,6 +103,8 @@ class FallDetector:
         self.dropped_at: dict[int, float] = {}
         self.lying_since: dict[int, float] = {}
         self.last_status: dict[int, str] = {}
+        self.fallen_at: dict[int, float] = {}    # 낙상 확정 시각 — 일어날 때까지 화면에 'FALL'(빨강) 유지
+        self.up_since: dict[int, float] = {}
 
     @staticmethod
     def _mid(kp, a, b):
@@ -142,9 +144,19 @@ class FallDetector:
         recent_drop = now - self.dropped_at.get(pid, -1e9) <= self.drop_window + self.lying_sec + 1
         fallen = (recent_drop and pid in self.lying_since
                   and now - self.lying_since[pid] >= self.lying_sec)
-        self.last_status[pid] = "FALL" if fallen else ("LYING" if lying else "OK")
         if fallen:
             self.dropped_at.pop(pid, None)       # 같은 낙상으로 중복 알림 방지
+            self.fallen_at[pid] = now
+        # 낙상 표시 유지: 확정된 뒤에는 2초 넘게 일어서 있을 때까지 빨간색으로 보여 준다
+        if pid in self.fallen_at:
+            if lying:
+                self.up_since.pop(pid, None)
+            else:
+                self.up_since.setdefault(pid, now)
+                if now - self.up_since[pid] > 2.0:
+                    self.fallen_at.pop(pid, None)
+                    self.up_since.pop(pid, None)
+        self.last_status[pid] = "FALL" if pid in self.fallen_at else ("LYING" if lying else "OK")
         return fallen
 
 
@@ -281,6 +293,7 @@ def draw_overlay(frame, people, fall_now, idle_sec, inactive_sec):
         cv2.rectangle(frame, (int(bbox[0]), int(bbox[1])), (int(bbox[2]), int(bbox[3])), color, 2)
         cv2.putText(frame, status, (int(bbox[0]), max(int(bbox[1]) - 8, 20)),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.7, color, 2)
+    fall_now = fall_now or any(st == "FALL" for _, _, st in people)    # 쓰러져 있는 동안 계속 표시
     label = "FALL DETECTED" if fall_now else (f"idle {int(idle_sec)}s / {int(inactive_sec)}s" if INACTIVITY_ON else "")
     cv2.putText(frame, f"OASIS  {time.strftime('%H:%M:%S')}  {label}", (12, 28),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255) if fall_now else (255, 255, 255), 2)
