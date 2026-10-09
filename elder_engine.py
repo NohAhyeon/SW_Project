@@ -652,7 +652,9 @@ async def daily_summary(db: AsyncSession, senior_id: int, day: str | None = None
     day = day or datetime.now().strftime("%Y-%m-%d")
     res = await db.execute(select(Conversation).where(
         or_(Conversation.senior_id == senior_id, Conversation.senior_id.is_(None))).order_by(Conversation.id))
-    convs = [c for c in res.scalars().all() if str(c.created_at or "").startswith(day)]
+    all_convs = res.scalars().all()
+    convs = [c for c in all_convs if str(c.created_at or "").startswith(day)]
+    last_user = next((c for c in reversed(all_convs) if c.role == "user"), None)
     said = []
     for c in convs:
         if c.role == "user":
@@ -700,6 +702,7 @@ async def daily_summary(db: AsyncSession, senior_id: int, day: str | None = None
         "new_memories": memories,
         "summary": text,
         "wake_name": await get_wake_name(db),
+        "last_talk_at": str(last_user.created_at)[:16] if last_user and last_user.created_at else None,
     }
 
 

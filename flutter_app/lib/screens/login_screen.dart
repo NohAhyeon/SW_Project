@@ -7,6 +7,7 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 import '../main.dart';
 import 'senior_main_page.dart';
 import 'senior_select_screen.dart';
+import 'profile_select_screen.dart';
 
 final String _serverUrl = dotenv.env['API_BASE_URL'] ?? 'http://localhost:8000';
 
@@ -40,7 +41,8 @@ Future<void> _routeAfterLogin(BuildContext ctx, String token, String username) a
 
   if (!ctx.mounted) return;
   Widget dest;
-  dest = const SeniorMainPage();
+  // 보호자는 어르신 고르기부터, 어르신은 바로 홈
+  dest = AppState.role == 'senior' ? const SeniorMainPage() : const ProfileSelectScreen();
   Navigator.of(ctx).pushAndRemoveUntil(
     MaterialPageRoute(builder: (_) => dest), (r) => false,
   );

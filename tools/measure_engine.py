@@ -68,6 +68,13 @@ def main():
     ap.add_argument("--repeat", type=int, default=1)
     args = ap.parse_args()
     session = f"measure-{int(time.time())}"
+    db = ROOT / "chatbot.db"
+    local = "localhost" in args.base and db.exists()
+    if local:                                   # 측정 대화로 장기기억이 쌓이지 않게 지금 상태를 저장해 둔다
+        con = sqlite3.connect(db)
+        row = con.execute("select value from settings where key='memory:4'").fetchone()
+        saved_memory = row[0] if row else None
+        con.close()
 
     rows, correct = [], 0
     for text, expect in CASES:
@@ -97,13 +104,17 @@ def main():
     print("\n" + "\n".join(lines[:12]))
     print(f"\n→ {out} 저장")
 
-    # 측정용 대화 기록 정리 (로컬 서버일 때만)
-    db = ROOT / "chatbot.db"
-    if "localhost" in args.base and db.exists():
+    # 측정용 대화 기록·장기기억 정리 (로컬 서버일 때만)
+    if local:
+        time.sleep(8)                           # 서버가 뒤에서 기억을 저장하는 작업이 끝날 때까지
         con = sqlite3.connect(db)
         n = con.execute("delete from conversations where session_id like ?", (f"{session}%",)).rowcount
+        if saved_memory is None:
+            con.execute("delete from settings where key='memory:4'")
+        else:
+            con.execute("update settings set value=? where key='memory:4'", (saved_memory,))
         con.commit()
-        print(f"(측정용 대화 {n}건 정리)")
+        print(f"(측정용 대화 {n}건 정리, 장기기억은 측정 전 상태로 되돌림)")
 
 
 if __name__ == "__main__":

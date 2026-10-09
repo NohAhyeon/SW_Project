@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../data/api_service.dart';
 import '../main.dart';
 import '../pages/camera_page.dart';
+import 'profile_select_screen.dart';
 
 // ── DESIGN TOKENS (Toss-style flat system) ─────────────────
 // 원칙: 그림자 대신 면 색 차이(흰 카드 / 회색 배경)로 구분하고,
@@ -38,7 +40,8 @@ const double _sXs = 20, _sSm = 24, _sMd = 28, _sLg = 34, _sXl = 44;
 // ════════════════════════════════════════════════════════════
 class SeniorMainPage extends StatefulWidget {
   final String? seniorName;
-  const SeniorMainPage({super.key, this.seniorName});
+  final SeniorProfile? profile;          // 어르신 고르기 화면에서 고른 어르신 (관계·연락처)
+  const SeniorMainPage({super.key, this.seniorName, this.profile});
 
   @override
   State<SeniorMainPage> createState() => _SeniorMainPageState();
@@ -84,6 +87,7 @@ class _SeniorMainPageState extends State<SeniorMainPage> {
             onGoCam: _goToCam,
             displayName: _displayName,
             refreshKey: _refreshKey,
+            profile: widget.profile,
           ),
           _MedTab(seniorView: _seniorView, onDataChanged: _dataChanged),
           _SchedTab(seniorView: _seniorView, onDataChanged: _dataChanged),
@@ -185,8 +189,10 @@ class _HomeTab extends StatefulWidget {
   final VoidCallback onToggleView, onGoMed, onGoSched, onGoSettings, onGoCam;
   final String displayName;
   final int refreshKey;
+  final SeniorProfile? profile;
 
   const _HomeTab({
+    this.profile,
     required this.seniorView,
     required this.onToggleView,
     required this.onGoMed,
@@ -237,6 +243,43 @@ class _HomeTabState extends State<_HomeTab> {
     if (mounted) setState(() => _summary = summary);
   }
 
+  void _backToProfiles() {
+    final nav = Navigator.of(context);
+    if (nav.canPop()) {
+      nav.pop();
+    } else {
+      nav.pushReplacement(MaterialPageRoute(builder: (_) => const ProfileSelectScreen()));
+    }
+  }
+
+  Future<void> _call(String number) async {
+    final ok = await launchUrl(Uri(scheme: 'tel', path: number)).catchError((_) => false);
+    if (!ok && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('이 기기에서는 전화를 걸 수 없어요 ($number)')),
+      );
+    }
+  }
+
+  Future<void> _confirm119() async {
+    final go = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: _surface,
+        title: const Text('119에 전화할까요?', style: TextStyle(fontWeight: FontWeight.w800)),
+        content: const Text('어르신 댁 주소와 상황(가스·낙상)을 말씀해 주세요.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('취소')),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('전화하기', style: TextStyle(color: _danger, fontWeight: FontWeight.w800)),
+          ),
+        ],
+      ),
+    );
+    if (go == true) await _call('119');
+  }
+
   @override
   Widget build(BuildContext context) {
     final s   = widget.seniorView;
@@ -258,17 +301,21 @@ class _HomeTabState extends State<_HomeTab> {
     // 비활동 감지는 수면·TV 시청 오작동 우려로 사용하지 않음
     final hasGas        = _alerts.any((a) => a['type'] == '가스' && a['status'] == '처리 중');
     final hasFall       = _alerts.any((a) => a['type'] == '낙상' && a['status'] == '처리 중');
-    final anyAlert      = hasGas || hasFall;
+    final hasUrgent     = _alerts.any((a) => a['type'] == '긴급' && a['status'] == '처리 중');
+    final anyAlert      = hasGas || hasFall || hasUrgent;
     final alertText = [
       if (hasGas) '가스 누출',
       if (hasFall) '낙상',
+      if (hasUrgent) '긴급 호출',
     ].join(', ');
 
     // 인사말 — 보호자 뷰는 보호자 이름, 어르신 뷰는 어르신 이름
     final greetName = s ? widget.displayName
         : (AppState.nickname ?? AppState.username ?? '보호자');
     final hello = now.hour < 12 ? '좋은 아침이에요' : (now.hour < 18 ? '좋은 오후예요' : '편안한 저녁 되세요');
-    final headline = s ? '$greetName님,\n$hello' : '$greetName님,\n오늘도 안심하세요';
+    final headline = s
+        ? '$greetName님,\n$hello'
+        : (anyAlert ? '$greetName님,\n지금 확인이 필요해요' : '$greetName님,\n오늘도 안심하세요');
 
     // 복약/일정 요약 문구
     final medSub = medTotal == 0
@@ -293,12 +340,15 @@ class _HomeTabState extends State<_HomeTab> {
               padding: const EdgeInsets.fromLTRB(20, 10, 8, 0),
               child: Row(
                 children: [
-                  const Text('OASIS',
-                      style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: -0.3,
-                          color: _text1)),
+                  if (!s && widget.profile != null)
+                    _SeniorSwitcher(profile: widget.profile!, onTap: _backToProfiles)
+                  else
+                    const Text('OASIS',
+                        style: TextStyle(
+                            fontSize: 20,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: -0.3,
+                            color: _text1)),
                   const Spacer(),
                   _ViewToggle(senior: s, onTap: widget.onToggleView),
                   IconButton(
@@ -407,6 +457,33 @@ class _HomeTabState extends State<_HomeTab> {
                         _SensorDot(label: '낙상', alert: hasFall, senior: s),
                       ],
                     ),
+                    // 위험할 때 보호자 화면: 바로 전화
+                    if (anyAlert && !s) ...[
+                      const SizedBox(height: 16),
+                      Row(children: [
+                        Expanded(
+                          child: _CallButton(
+                            icon: Icons.call_rounded,
+                            label: (widget.profile?.phone.isNotEmpty ?? false)
+                                ? '${widget.profile!.name} 어르신께 전화'
+                                : '어르신 번호 없음',
+                            filled: false,
+                            onTap: (widget.profile?.phone.isNotEmpty ?? false)
+                                ? () => _call(widget.profile!.phone)
+                                : null,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: _CallButton(
+                            icon: Icons.local_hospital_rounded,
+                            label: hasGas ? '119 신고 (가스)' : '119 신고',
+                            filled: true,
+                            onTap: () => _confirm119(),
+                          ),
+                        ),
+                      ]),
+                    ],
                   ],
                 ),
               ),
@@ -745,6 +822,74 @@ class _MessageCardState extends State<_MessageCard> {
               child: Text(_error!, style: const TextStyle(fontSize: 13, color: _danger)),
             ),
         ],
+      ),
+    );
+  }
+}
+
+// ── 보호자 홈 상단: 지금 보고 있는 어르신 (누르면 어르신 고르기로)
+class _SeniorSwitcher extends StatelessWidget {
+  final SeniorProfile profile;
+  final VoidCallback onTap;
+  const _SeniorSwitcher({required this.profile, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: _surface,
+      borderRadius: BorderRadius.circular(99),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(99),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(6, 6, 12, 6),
+          child: Row(mainAxisSize: MainAxisSize.min, children: [
+            Container(
+              width: 30,
+              height: 30,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(color: _brand, borderRadius: BorderRadius.circular(10)),
+              child: Text(profile.name.isEmpty ? '?' : profile.name.characters.first,
+                  style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w800)),
+            ),
+            const SizedBox(width: 8),
+            Text('${profile.name} 어르신',
+                style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800, color: _text1)),
+            const SizedBox(width: 2),
+            const Icon(Icons.expand_more_rounded, color: _text3, size: 20),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
+class _CallButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final bool filled;
+  final VoidCallback? onTap;
+  const _CallButton({required this.icon, required this.label, required this.filled, this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = onTap != null;
+    return SizedBox(
+      height: 50,
+      child: ElevatedButton.icon(
+        onPressed: onTap,
+        icon: Icon(icon, size: 20),
+        label: Text(label, maxLines: 1, overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w800)),
+        style: ElevatedButton.styleFrom(
+          elevation: 0,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
+          backgroundColor: filled ? _danger : _dangerSoft,
+          foregroundColor: filled ? Colors.white : _danger,
+          disabledBackgroundColor: _bg,
+          disabledForegroundColor: enabled ? null : _text4,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        ),
       ),
     );
   }

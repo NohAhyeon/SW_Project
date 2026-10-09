@@ -11,6 +11,7 @@ import 'screens/splash_screen.dart';
 import 'screens/login_screen.dart';
 import 'screens/senior_main_page.dart';
 import 'screens/senior_select_screen.dart';
+import 'screens/profile_select_screen.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:firebase_core/firebase_core.dart';
 
@@ -93,7 +94,7 @@ class _DebugHomeState extends State<_DebugHome> {
     AppState.userId = 5;
     if (!mounted) return;
     Navigator.of(context).pushReplacement(
-      MaterialPageRoute(builder: (_) => const SeniorMainPage()),
+      MaterialPageRoute(builder: (_) => const ProfileSelectScreen()),
     );
   }
 
