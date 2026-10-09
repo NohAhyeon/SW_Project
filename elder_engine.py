@@ -382,17 +382,64 @@ async def _my_meds(db: AsyncSession, senior_id: int) -> list[Medicine]:
     return sorted(meds, key=lambda m: _hhmm_minutes((m.alarm_times or "").split(",")[0]) or 0)
 
 
-async def _answer_med_query(db: AsyncSession, senior_id: int) -> str:
+def _ampm(hhmm: str) -> str:
+    """'11:00' → '오전 11시', '20:30' → '오후 8시 30분'"""
+    m = re.match(r"(\d{1,2}):(\d{2})", hhmm or "")
+    if not m:
+        return hhmm
+    h, mi = int(m.group(1)), int(m.group(2))
+    h12 = 12 if h % 12 == 0 else h % 12
+    return f"{'오전' if h < 12 else '오후'} {h12}시" + (f" {mi}분" if mi else "")
+
+
+def _on_day(m: Medicine, day: str) -> bool:
+    """복용 기간(start_date~end_date) 안에 있는 약인가"""
+    return (not m.start_date or m.start_date <= day) and (not m.end_date or m.end_date >= day)
+
+
+def _and(names: list[str]) -> str:
+    """['비타민약', '혈압약'] → '비타민약이랑 혈압약'"""
+    out = ""
+    for i, n in enumerate(names):
+        if i:
+            code = ord(out[-1]) - 0xAC00
+            out += ("이랑 " if 0 <= code < 11172 and code % 28 else "랑 ")
+        out += n
+    return out
+
+
+def _med_group_text(meds: list[Medicine]) -> str:
+    """같은 시간끼리 묶기: '오전 11시에 비타민약이랑 혈압약 1정'"""
+    groups: dict[str, list[Medicine]] = {}
+    for m in meds:
+        groups.setdefault((m.alarm_times or "").split(",")[0], []).append(m)
+    parts = []
+    for t, ms in sorted(groups.items(), key=lambda kv: _hhmm_minutes(kv[0]) or 0):
+        ms = sorted(ms, key=lambda m: m.name)
+        doses = {m.dose for m in ms if m.dose}
+        dose = f" {doses.pop()}" if len(doses) == 1 else ""
+        parts.append(f"{_ampm(t)}에 {_and([m.name for m in ms])}{dose}")
+    return ", ".join(parts)
+
+
+async def _answer_med_query(db: AsyncSession, senior_id: int, text: str = "") -> str:
     meds = await _my_meds(db, senior_id)
     if not meds:
         return "등록된 약이 없어요. 보호자분께 약을 등록해 달라고 말씀드려 볼게요."
-    left = [m for m in meds if not m.taken]
+    today = datetime.now().strftime("%Y-%m-%d")
+    tomorrow = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
+    left = [m for m in meds if _on_day(m, today) and not m.taken]
+    ask_tomorrow = "내일" in (text or "")
+    if ask_tomorrow:
+        tmr = [m for m in meds if _on_day(m, tomorrow)]
+        today_part = (f"오늘 남은 약은 {_med_group_text(left)}" if left else "오늘 드실 약은 없고")
+        if not tmr:
+            return today_part + (", 내일 드실 약은 없어요." if not left else "이에요. 내일 드실 약은 없어요.")
+        return f"{today_part}{'이고' if left else ''}, 내일 {_med_group_text(tmr)} 남았어요."
     if not left:
-        return "오늘 드실 약은 모두 드셨어요. 잘하셨어요!"
-    parts = [f"{_korean_time((m.alarm_times or '').split(',')[0])} {m.name}" for m in left[:3]]
-    if len(left) > 3:
-        return f"오늘 남은 약은 {', '.join(parts)} 말고도 {len(left) - 3}개가 더 있어요."
-    return f"오늘 남은 약은 {', '.join(parts)}이에요."
+        return "오늘 드실 약은 모두 드셨어요. 잘하셨어요!" if any(_on_day(m, today) for m in meds) \
+            else "오늘 드실 약은 없어요."
+    return f"오늘 남은 약은 {_med_group_text(left)}이에요."
 
 
 async def _record_med_taken(db: AsyncSession, senior_id: int, t: str) -> str:
@@ -956,7 +1003,8 @@ async def _tidy_text(text: str) -> str | None:
     prompt = ("아래는 부산·경상도 어르신이 말한 것을 음성 인식이 받아 적은 문장이야. 소리 나는 대로 잘못 적힌 "
               "글자와 띄어쓰기만 고쳐서 자연스러운 한 문장으로 써. 뜻을 바꾸거나 말을 보태지 말고, "
               "사투리 말투(~노, ~나, 묵다 등)는 살려. 고칠 게 없으면 그대로 써. 고친 문장만 답해.\n"
-              "예) 지금 몇 쉬고? → 지금 몇 시고?\n예) 와일이 어지럽나 → 와 이리 어지럽노\n"
+              "예) 지금 몇 쉬고? → 지금 몇 시고?\n예) 오늘 와일이 어지럽나 → 오늘 와이리 어지럽노\n"
+              "예) 철스야 → 철수야\n예) 오늘 약 남은 거랑 내일 묵을 약 있나 → 오늘 약 남은 거랑 내일 먹을 약 있나?\n"
               "문장: " + text)
     out, source, _ = await _ask_llm([{"role": "user", "content": prompt}])
     out = (out or "").strip().strip('"').split("\n")[0].strip()
@@ -1140,7 +1188,7 @@ async def reply(db: AsyncSession, text: str, session_id: str, senior_id: int,
     # 5) 약·일정·시간·날씨 질문
     elif MED_RE.search(t) and MED_ASK_RE.search(t):
         intent, ctype, source = "med_query", "복약", "db"
-        answer = await _answer_med_query(db, senior_id)
+        answer = await _answer_med_query(db, senior_id, std)
     elif SCHED_RE.search(t):
         intent, ctype, source = "sched_query", "일정", "db"
         answer = await _answer_sched_query(db, senior_id, t)
