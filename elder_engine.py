@@ -890,11 +890,56 @@ async def _send_senior_message(db: AsyncSession, senior_id: int, to: str, text: 
 #  메인 진입점
 # ════════════════════════════════════════════════════════════
 async def _save(db: AsyncSession, session_id: str, senior_id: int, role: str, text: str, ctype: str):
-    row = Conversation(session_id=session_id, senior_id=senior_id, role=role, content=encrypt(text), type=ctype)
-    db.add(row)
+    """대화 저장. 어르신 말은 다듬은 문장으로 저장하되 대답을 기다리게 하지 않는다:
+    어르신 말을 받으면 다듬기를 바로 시작해 두고, 이어지는 대답 저장 때 둘을 함께 뒤에서 저장한다.
+    (그래서 기록 탭에는 처음부터 다듬어진 문장만 보인다)"""
+    now = datetime.now()
+    if TIDY_LOG and role == "user":
+        _pending_user[session_id] = {"task": asyncio.create_task(_tidy_text(text)), "text": text,
+                                     "senior_id": senior_id, "type": ctype, "at": now}
+        asyncio.create_task(_flush_later(session_id, now))
+        return
+    pend = _pending_user.pop(session_id, None) if role == "assistant" else None
+    if pend:
+        asyncio.create_task(_flush(session_id, pend, (text, ctype, now)))
+        return
+    db.add(Conversation(session_id=session_id, senior_id=senior_id, role=role, content=encrypt(text),
+                        type=ctype, created_at=now))
     await db.commit()
-    if role == "user" and TIDY_LOG:                # 기록용 문장 다듬기는 대답을 돌려준 뒤 뒤에서
-        asyncio.create_task(_tidy_later(row.id, text))
+
+
+_pending_user: dict[str, dict] = {}
+
+
+async def _flush(session_id: str, pend: dict, answer: tuple | None) -> None:
+    """다듬기가 끝나면(최대 5초) 어르신 말 → 대답 순서로 저장"""
+    try:
+        tidy = await asyncio.wait_for(pend["task"], timeout=5)
+    except Exception:
+        tidy = None
+    said = tidy or pend["text"]
+    if tidy:
+        print(f"[기록 다듬기] {pend['text']} → {tidy}")
+    try:
+        async with AsyncSessionLocal() as db:
+            db.add(Conversation(session_id=session_id, senior_id=pend["senior_id"], role="user",
+                                content=encrypt(said), type=pend["type"], created_at=pend["at"]))
+            if answer:
+                a_text, a_type, a_at = answer
+                db.add(Conversation(session_id=session_id, senior_id=pend["senior_id"], role="assistant",
+                                    content=encrypt(a_text), type=a_type, created_at=a_at))
+            await db.commit()
+    except Exception as e:
+        print(f"[기록 저장 실패] {e}")
+
+
+async def _flush_later(session_id: str, at: datetime) -> None:
+    """대답 없이 끝난 어르신 말도 잃지 않게 6초 뒤 저장"""
+    await asyncio.sleep(6)
+    pend = _pending_user.get(session_id)
+    if pend and pend["at"] == at:
+        _pending_user.pop(session_id, None)
+        await _flush(session_id, pend, None)
 
 
 # ── 기록용 문장 다듬기 ───────────────────────────────────────
@@ -920,21 +965,6 @@ async def _tidy_text(text: str) -> str | None:
     if len(out) > len(text) * 1.6 + 6 or len(out) < len(text) * 0.5:   # 말을 보태거나 크게 줄였으면 버림
         return None
     return out if out != text else None
-
-
-async def _tidy_later(conv_id: int, text: str) -> None:
-    try:
-        tidy = await _tidy_text(text)
-        if not tidy:
-            return
-        async with AsyncSessionLocal() as db:
-            row = await db.get(Conversation, conv_id)
-            if row:
-                row.content = encrypt(tidy)
-                await db.commit()
-                print(f"[기록 다듬기] {text} → {tidy}")
-    except Exception as e:
-        print(f"[기록 다듬기 실패] {e}")
 
 
 async def reply(db: AsyncSession, text: str, session_id: str, senior_id: int,
