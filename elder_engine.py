@@ -146,6 +146,11 @@ def find_wake_name(t: str, name: str):
         return None
     if name in t:
         return name
+    # '순돌이' 를 '순돌아' 처럼 부를 때 (끝의 '이'가 부르는 말로 바뀜)
+    if len(name) >= 3 and name.endswith("이"):
+        for call in (name[:-1] + "아", name[:-1] + "야"):
+            if call in t:
+                return call
     target = _phon(name)
     windows = [t[i:i + size] for size in (len(name) - 1, len(name), len(name) + 1) if size > 0
                for i in range(0, max(len(t) - size + 1, 0))]
@@ -156,7 +161,7 @@ def find_wake_name(t: str, name: str):
         return None
     best, best_ratio = None, 0.0
     for sub in windows:
-        ratio = SequenceMatcher(None, _phon(sub), target).ratio()
+        ratio = SequenceMatcher(None, _phon(sub), target).ratio() - 0.05 * abs(len(sub) - len(name))
         if ratio > best_ratio:
             best, best_ratio = sub, ratio
     return best if best_ratio >= 0.8 else None
@@ -164,7 +169,8 @@ def find_wake_name(t: str, name: str):
 
 def strip_wake_name(text: str, found: str) -> str:
     """원래 문장에서 이름(+ '야', '아' 같은 부르는 말)을 떼어낸다"""
-    pattern = r"\s*".join(map(re.escape, found)) + r"(?:\s*(?:야|아|이|씨|님))?[\s,.!?~]*"
+    # 부르는 말('야','아','님')은 바로 뒤가 띄어쓰기·문장부호일 때만 뗀다 ('순돌아 이름…'의 '이'를 떼지 않게)
+    pattern = r"\s*".join(map(re.escape, found)) + r"(?:\s*(?:야|아|이|씨|님)(?=[\s,.!?~]|$))?[\s,.!?~]*"
     return re.sub(pattern, " ", text, count=1).strip()
 
 
@@ -209,12 +215,40 @@ NAME_YES = ["맞아", "맞다", "맞네", "맞어", "맞습", "맞지", "그래"
 
 def _strip_fillers(t: str) -> str:
     """음성 인식 앞뒤에 붙는 '아', '어', '음' 같은 군말 제거 ('아어맞다' → '맞다')"""
-    return re.sub(r"^(아|어|음|으|에|저기|그)+(?=.)", "", t)
+    return re.sub(r"^(?:(?:아|어|음|으|에)(?!니)|저기)+(?=.)", "", t)      # '아니'의 '아'는 남김
 
 
 def _naming_yes(t: str) -> bool:
     core = _strip_fillers(t)
     return t in YES_EXACT or core in YES_EXACT or (_has(NAME_YES, core) and not _has(["아니", "틀렸"], core))
+
+
+NAME_UNDO_SEC = 20                   # 이름을 바꾼 직후 "아니야" 하면 되돌림
+
+
+async def _apply_name(db: AsyncSession, session_id: str, name: str) -> str:
+    """확인 없이 바로 이름을 바꾼다. 잘못 들었을 때를 위해 잠깐 동안 '아니야'로 되돌릴 수 있게 한다"""
+    old = await get_wake_name(db) if await is_wake_name_set(db) else None
+    name = await set_wake_name(db, name)
+    _naming[session_id] = {"stage": "undo", "old": old, "name": name, "at": time.time()}
+    _awake_until[session_id] = time.time() + WAKE_WINDOW_SEC
+    return (f"좋아요! 이제부터 저는 {_subject(name)}. '{_calling(name)}' 하고 부르시면 대답할게요. "
+            "잘못 들었으면 '아니야'라고 말씀해 주세요.")
+
+
+async def _maybe_undo_name(db: AsyncSession, session_id: str, t: str) -> str | None:
+    """이름을 바꾼 직후의 말: '아니야'면 되돌리고 다시 여쭤봄, 아니면 이름 짓기를 끝내고 평소 대화로"""
+    st = _naming.get(session_id)
+    if not st or st.get("stage") != "undo":
+        return None
+    _naming.pop(session_id, None)
+    core = _strip_fillers(t)
+    if time.time() - st["at"] <= NAME_UNDO_SEC and len(core) <= 8 and (_has(NO_WORDS, core) or "틀렸" in core):
+        await set_wake_name(db, st["old"] or DEFAULT_WAKE_NAME)
+        _naming[session_id] = {"stage": "ask", "at": time.time()}
+        _awake_until[session_id] = time.time() + WAKE_WINDOW_SEC
+        return "앗, 죄송해요. 그럼 뭐라고 불러 주실래요?"
+    return None
 
 
 def _naming_cancel(t: str) -> bool:
@@ -297,8 +331,7 @@ async def _naming_step(db: AsyncSession, session_id: str, t: str, text: str) -> 
     except ValueError:
         state.update(stage="ask")
         return "잘 못 들었어요. '복실이'처럼 두세 글자 이름으로 다시 말씀해 주세요."
-    state.update(stage="confirm", name=candidate)
-    return f"'{candidate}'라고 부르시는 거 맞아요?"
+    return await _apply_name(db, session_id, candidate)
 
 
 def _norm(text: str) -> str:
@@ -841,6 +874,13 @@ async def reply(db: AsyncSession, text: str, session_id: str, senior_id: int,
     urgent_now = _has(EMERGENCY_WORDS, t) and "뻔" not in t
     if not urgent_now and len(t) >= 1:
         first_time = require_wake and not await is_wake_name_set(db)
+        undo = await _maybe_undo_name(db, session_id, t)
+        if undo:
+            await _save(db, session_id, senior_id, "user", text, "생활정보")
+            await _save(db, session_id, senior_id, "assistant", undo, "생활정보")
+            return {"respond": True, "reply": undo, "intent": "naming", "source": "rule",
+                    "wake_name": await get_wake_name(db),
+                    "latency_ms": int((time.perf_counter() - started) * 1000), "llm_ms": 0}
         st = _naming.get(session_id)
         if st and not first_time and time.time() - st.get("at", time.time()) > NAMING_TIMEOUT_SEC:
             _naming.pop(session_id, None)          # 오래 전에 여쭤본 이름 짓기는 끝내고 평소 대화로
@@ -883,9 +923,7 @@ async def reply(db: AsyncSession, text: str, session_id: str, senior_id: int,
         new_name = next((m.group("n") for r in RENAME_TO_RE if (m := r.search(t))), None)
         if new_name:                             # "이름을 철수로 바꿔줘" → 바로 확인
             try:
-                new_name = validate_wake_name(new_name)
-                _naming[session_id] = {"stage": "confirm", "name": new_name, "at": time.time()}
-                answer = f"'{new_name}'라고 부르시는 거 맞아요?"
+                answer = await _apply_name(db, session_id, validate_wake_name(new_name))
             except ValueError:
                 _naming[session_id] = {"stage": "ask", "at": time.time()}
                 answer = "좋아요. 그럼 뭐라고 불러 주실래요?"
