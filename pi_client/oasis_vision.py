@@ -345,14 +345,20 @@ def run_hailo():
                    draw_overlay(cv2.cvtColor(f, cv2.COLOR_RGB2BGR), p, fn, s, INACTIVE_SEC))
         return Gst.PadProbeReturn.OK
 
-    if "--use-frame" not in sys.argv:
-        sys.argv.append("--use-frame")
     if "--input" not in sys.argv:
         sys.argv += ["--input", "usb"]
     if "--disable-sync" not in sys.argv:             # 화면 시계에 맞춰 기다리지 않고 들어오는 대로 처리
         sys.argv.append("--disable-sync")
     print(f"[AI HAT 모드] 백엔드 {BACKEND_URL} / 비활동 {INACTIVE_SEC}초 / 낙상 후 누움 {FALL_LYING_SEC}초")
-    GStreamerPoseEstimationApp(callback, UserData()).run()
+    # 화면 창 없이 실행 (아현 수정): 출력 끝을 fakesink 로 바꿔야 서비스(화면 없음)에서도 초당 20장이 나온다.
+    #   fpsdisplaysink/autovideosink 는 화면을 못 잡아 느려지고, 큐를 버리지 않아 파이프라인 전체가 같이 느려졌다.
+    #   --use-frame 도 쓰지 않는다 (화면 창 프로세스가 CPU 100% 로 헛돎). 영상은 콜백에서 버퍼를 직접 읽는다.
+    class HeadlessPoseApp(GStreamerPoseEstimationApp):
+        def get_pipeline_string(self):
+            self.video_sink = "fakesink"
+            return super().get_pipeline_string()
+
+    HeadlessPoseApp(callback, UserData()).run()
 
 
 # ════════════════════════════════════════════════════════════
