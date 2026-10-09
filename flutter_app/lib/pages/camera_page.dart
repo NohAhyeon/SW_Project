@@ -77,7 +77,11 @@ class _CameraPageState extends State<CameraPage>
       _inactivityAlerts.any((a) => a["status"] == "처리 중");
   bool get _hasGasAlert =>
       _gasAlerts.any((a) => a["status"] == "처리 중");
-  bool get _hasCriticalAlert => _hasInactivityAlert || _hasGasAlert;
+  List<Map> get _fallAlerts =>
+      _allAlerts.where((a) => a["type"] == "낙상").toList();
+  bool get _hasFallAlert =>
+      _fallAlerts.any((a) => a["status"] == "처리 중");
+  bool get _hasCriticalAlert => _hasInactivityAlert || _hasGasAlert || _hasFallAlert;
 
   int get _todayCount {
     final today = DateTime.now();
@@ -539,11 +543,13 @@ class _CameraPageState extends State<CameraPage>
                 child: _SensorCard(
                   icon: Icons.personal_injury_rounded,
                   label: '낙상 감지',
-                  status: '정상',
-                  isAlert: false,
-                  count: 0,
-                  gradient: const LinearGradient(colors: [Colors.white, Colors.white]),
-                  iconColor: const Color(0xFF2F6FEB),
+                  status: _hasFallAlert ? '낙상 감지' : '정상',
+                  isAlert: _hasFallAlert,
+                  count: _fallAlerts.length,
+                  gradient: _hasFallAlert
+                      ? const LinearGradient(colors: [Color(0xFFFEF0F0), Color(0xFFFFF5F5)])
+                      : const LinearGradient(colors: [Colors.white, Colors.white]),
+                  iconColor: _hasFallAlert ? const Color(0xFFDC2626) : const Color(0xFF2F6FEB),
                 ),
               ),
             ],

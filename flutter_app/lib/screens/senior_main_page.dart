@@ -253,11 +253,31 @@ class _HomeTabState extends State<_HomeTab> {
     if (mounted && wakeNameNotifier.value != null) setState(() => _wakeName = wakeNameNotifier.value);
   }
 
-  @override
-  void initState() { super.initState(); wakeNameNotifier.addListener(_onName); _load(); }
+  Timer? _alertTimer;
 
   @override
-  void dispose() { wakeNameNotifier.removeListener(_onName); super.dispose(); }
+  void initState() {
+    super.initState();
+    wakeNameNotifier.addListener(_onName);
+    _load();
+    // 가스·낙상·긴급 알림은 5초마다 확인해서 '지금 집 안은' 카드에 바로 반영
+    _alertTimer = Timer.periodic(const Duration(seconds: 5), (_) => _refreshAlerts());
+  }
+
+  @override
+  void dispose() {
+    _alertTimer?.cancel();
+    wakeNameNotifier.removeListener(_onName);
+    super.dispose();
+  }
+
+  Future<void> _refreshAlerts() async {
+    if (_loading) return;
+    final alerts = await ApiService.getAlerts();
+    if (!mounted) return;
+    String sig(List<Map> l) => l.map((a) => '${a['id']}:${a['status']}').join(',');
+    if (sig(alerts) != sig(_alerts)) setState(() => _alerts = alerts);
+  }
 
   @override
   void didUpdateWidget(_HomeTab old) {
