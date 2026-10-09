@@ -12,6 +12,7 @@ import 'screens/login_screen.dart';
 import 'screens/senior_main_page.dart';
 import 'screens/senior_select_screen.dart';
 import 'screens/profile_select_screen.dart';
+import 'data/alert_notifier.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:firebase_core/firebase_core.dart';
 
@@ -34,6 +35,7 @@ void main() async {
     debugPrint('Firebase 초기화를 건너뜁니다: $error');
   }
   await dotenv.load(fileName: ".env");
+  AlertNotifier.instance.start();          // 낙상·가스·긴급 → 보호자 폰 알림
   KakaoSdk.init(nativeAppKey: dotenv.env['KAKAO_NATIVE_APP_KEY'] ?? '');
   runApp(const MyApp());
 }
