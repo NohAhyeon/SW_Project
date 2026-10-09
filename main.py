@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from database import engine, Base
-from routers import chat, medicine, schedule, alert, admin, auth, guardian, camera, settings
+from routers import chat, medicine, schedule, alert, admin, auth, guardian, camera, settings, talk
 from scheduler import start_scheduler
 
 app = FastAPI(title="노인케어 챗봇 백엔드")
@@ -34,6 +34,7 @@ app.include_router(admin.router, prefix="/admin", tags=["중앙 관리"])
 app.include_router(guardian.router, prefix="/guardian", tags=["보호자 관리"])
 app.include_router(camera.router, prefix="/camera", tags=["카메라"])
 app.include_router(settings.router, prefix="/settings", tags=["설정"])
+app.include_router(talk.router, prefix="/talk", tags=["노인 맞춤 대화"])
 
 @app.get("/")
 async def root():
