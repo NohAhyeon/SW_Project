@@ -58,6 +58,7 @@ class _CameraPageState extends State<CameraPage>
   int _countdown = _refreshInterval;
   Timer? _pollingTimer;
   Timer? _countdownTimer;
+  Timer? _quickTimer;          // 2초마다 위험 알림만 빠르게 확인 (낙상·가스가 오면 바로 빨갛게)
 
   // ── 애니메이션 ────────────────────────────────────────────────────────────
   late AnimationController _pulseController;   // LIVE 점 깜빡임
@@ -160,12 +161,25 @@ class _CameraPageState extends State<CameraPage>
       const Duration(seconds: _refreshInterval),
       (_) => _loadAlerts(),
     );
+    _quickTimer = Timer.periodic(const Duration(seconds: 2), (_) => _quickCheck());
     _countdownTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (!mounted) return;
       setState(() {
         _countdown = _countdown > 0 ? _countdown - 1 : _refreshInterval;
       });
     });
+  }
+
+  String _sig(List<Map> l) => l.map((a) => '${a['id']}:${a['status']}').join(',');
+
+  /// 화면을 깜빡이지 않고 알림만 확인: 바뀐 게 있을 때만 반영
+  Future<void> _quickCheck() async {
+    if (!mounted || _isLoading) return;
+    final data = await ApiService.getAlerts();
+    if (!mounted) return;
+    const sensorTypes = {'가스', '낙상', '긴급'};
+    final next = data.where((a) => sensorTypes.contains(a['type'])).toList();
+    if (_sig(next) != _sig(_allAlerts)) _applyAlerts(data);
   }
 
   Future<void> _loadAlerts() async {
@@ -175,6 +189,10 @@ class _CameraPageState extends State<CameraPage>
     final data = await ApiService.getAlerts();
 
     if (!mounted) return;
+    _applyAlerts(data);
+  }
+
+  void _applyAlerts(List<Map> data) {
     final hadCritical = _hasCriticalAlert;
     // 비활동 감지는 수면·TV 시청 오작동 우려로 사용하지 않음 (가스·낙상·긴급만 표시)
     const sensorTypes = {'가스', '낙상', '긴급'};
@@ -206,6 +224,7 @@ class _CameraPageState extends State<CameraPage>
   void dispose() {
     _pollingTimer?.cancel();
     _countdownTimer?.cancel();
+    _quickTimer?.cancel();
     _pulseController.dispose();
     _bannerController.dispose();
     super.dispose();

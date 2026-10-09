@@ -260,8 +260,8 @@ class _HomeTabState extends State<_HomeTab> {
     super.initState();
     wakeNameNotifier.addListener(_onName);
     _load();
-    // 가스·낙상·긴급 알림은 5초마다 확인해서 '지금 집 안은' 카드에 바로 반영
-    _alertTimer = Timer.periodic(const Duration(seconds: 5), (_) => _refreshAlerts());
+    // 가스·낙상·긴급 알림은 2초마다 확인해서 '지금 집 안은' 카드에 바로 반영
+    _alertTimer = Timer.periodic(const Duration(seconds: 2), (_) => _refreshAlerts());
   }
 
   @override

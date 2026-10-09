@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -92,10 +93,36 @@ class _ProfileSelectScreenState extends State<ProfileSelectScreen> {
   _LiveStatus? _live;
   bool _editing = false;
 
+  Timer? _dangerTimer;
+
   @override
   void initState() {
     super.initState();
     _load();
+    // 위험 알림은 2초마다 확인 → 어르신 카드가 바로 빨갛게
+    _dangerTimer = Timer.periodic(const Duration(seconds: 2), (_) => _refreshDanger());
+  }
+
+  @override
+  void dispose() {
+    _dangerTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _refreshDanger() async {
+    final l = _live;
+    if (l == null) return;
+    final alerts = await ApiService.getAlerts();
+    final open = alerts.where((a) => a['status'] == '처리 중').map((a) => a['type']).toSet();
+    final danger = [
+      if (open.contains('가스')) '가스 누출',
+      if (open.contains('낙상')) '낙상',
+      if (open.contains('긴급')) '긴급 호출',
+    ].join(', ');
+    final d = danger.isEmpty ? null : danger;
+    if (mounted && d != l.danger) {
+      setState(() => _live = _LiveStatus(danger: d, medDone: l.medDone, medTotal: l.medTotal, lastTalk: l.lastTalk));
+    }
   }
 
   Future<void> _load() async {
@@ -212,7 +239,7 @@ class _ProfileSelectScreenState extends State<ProfileSelectScreen> {
       if (l.medTotal > 0) '복약 ${l.medDone}/${l.medTotal}',
       if (l.lastTalk != null) _ago(l.lastTalk!),
     ];
-    return parts.isEmpty ? '안전해요' : parts.join(' · ');
+    return parts.isEmpty ? '안전해요' : parts.join('\n');
   }
 
   // '2026-10-09 15:41' → '오늘 오후 3:41 대화' / '어제 대화' / '3일 전 대화'
@@ -223,7 +250,7 @@ class _ProfileSelectScreenState extends State<ProfileSelectScreen> {
     final days = DateTime(now.year, now.month, now.day).difference(DateTime(t.year, t.month, t.day)).inDays;
     if (days == 0) {
       final h = t.hour % 12 == 0 ? 12 : t.hour % 12;
-      return '오늘 ${t.hour < 12 ? '오전' : '오후'} $h:${t.minute.toString().padLeft(2, '0')} 대화';
+      return '${t.hour < 12 ? '오전' : '오후'} $h:${t.minute.toString().padLeft(2, '0')} 대화';
     }
     return days == 1 ? '어제 대화' : '$days일 전 대화';
   }
@@ -263,7 +290,7 @@ class _ProfileSelectScreenState extends State<ProfileSelectScreen> {
                 physics: const NeverScrollableScrollPhysics(),
                 mainAxisSpacing: 14,
                 crossAxisSpacing: 14,
-                childAspectRatio: 0.82,
+                childAspectRatio: 0.74,
                 children: [
                   ..._profiles.map((p) => _ProfileTile(
                         profile: p,
@@ -330,9 +357,10 @@ class _ProfileTile extends StatelessWidget {
                   style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800, color: _text1)),
               const SizedBox(height: 4),
               Text(profile.relation, style: const TextStyle(fontSize: 13, color: _text3, fontWeight: FontWeight.w600)),
-              const Spacer(),
+              const SizedBox(height: 10),
               Text(status,
-                  maxLines: 1,
+                  maxLines: 2,
+                  textAlign: TextAlign.center,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                       fontSize: 13,
