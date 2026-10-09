@@ -16,6 +16,8 @@ OASIS 비전 — USB 웹캠 하나로 ① 홈캠 실시간 영상 ② 낙상 감
   OASIS_BACKEND_URL   백엔드 주소            예) http://192.168.10.69:8000
   OASIS_INACTIVE_SEC  비활동 알림까지 초      시연 30, 실사용 1800(30분)
   OASIS_FALL_LYING_SEC 쓰러진 뒤 누워 있는 시간 2
+  OASIS_FALL_DROP      서 있던 키 대비 엉덩이가 내려가야 하는 비율 0.25 (낮은 침대·매트로 쓰러져도 잡히게)
+  OASIS_FALL_WINDOW    그만큼 내려가는 데 걸리는 최대 시간(초) 1.5
   OASIS_STREAM_PORT   홈캠 영상 포트          5000
   OASIS_CAMERA        비상 모드 카메라 번호    0 (/dev/video0)
 
@@ -36,6 +38,8 @@ from flask import Flask, Response
 BACKEND_URL      = os.getenv("OASIS_BACKEND_URL", "http://192.168.10.69:8000").rstrip("/")
 INACTIVE_SEC     = float(os.getenv("OASIS_INACTIVE_SEC", "30"))
 FALL_LYING_SEC   = float(os.getenv("OASIS_FALL_LYING_SEC", "2"))
+FALL_DROP        = float(os.getenv("OASIS_FALL_DROP", "0.25"))     # 0.35 → 0.25: 낮은 침대로 쓰러지면 엉덩이가 덜 내려감
+FALL_WINDOW      = float(os.getenv("OASIS_FALL_WINDOW", "1.5"))    # 1.0 → 1.5초: 몸이 침대에 걸치며 쓰러지는 경우
 STREAM_PORT      = int(os.getenv("OASIS_STREAM_PORT", "5000"))
 ALERT_COOLDOWN   = float(os.getenv("OASIS_ALERT_COOLDOWN", "60"))
 NO_HAILO         = os.getenv("OASIS_NO_HAILO") == "1"
@@ -86,12 +90,12 @@ class AlertSender:
 
 # ════════════════════════════════════════════════════════════
 #  낙상 감지 — 관절 좌표 기반
-#    1) 엉덩이가 1초 안에 '키의 35% 이상' 빠르게 내려감 (급격한 하강)
+#    1) 엉덩이가 1.5초 안에 '키의 25% 이상' 빠르게 내려감 (급격한 하강, OASIS_FALL_DROP·OASIS_FALL_WINDOW 로 조절)
 #    2) 그 뒤 몸이 누운 자세(몸통 기울기 60도 이상 또는 가로로 긴 몸)로 FALL_LYING_SEC 이상 유지
 #    → 둘 다 만족하면 낙상. 천천히 눕는 것(침대)은 1)이 없어서 낙상으로 보지 않는다.
 # ════════════════════════════════════════════════════════════
 class FallDetector:
-    def __init__(self, drop_ratio=0.35, drop_window=1.0, lying_sec=FALL_LYING_SEC,
+    def __init__(self, drop_ratio=FALL_DROP, drop_window=FALL_WINDOW, lying_sec=FALL_LYING_SEC,
                  lying_angle=60.0, min_score=0.3):
         self.drop_ratio, self.drop_window = drop_ratio, drop_window
         self.lying_sec, self.lying_angle, self.min_score = lying_sec, lying_angle, min_score
@@ -125,7 +129,7 @@ class FallDetector:
             h.append((now, hip_y, max(bbox[3] - bbox[1], 1.0), lying))
         while h and now - h[0][0] > self.drop_window:
             h.popleft()
-        # 급격한 하강: 1초 안에, '서 있던(누워 있지 않던)' 시점보다 엉덩이가 그때 키의 35% 이상 내려감
+        # 급격한 하강: drop_window 초 안에, '서 있던(누워 있지 않던)' 시점보다 엉덩이가 그때 키의 drop_ratio 이상 내려감
         # → 누운 채 뒤척이는 건 시작 자세가 누운 자세라 해당 없음
         if h and any(not e[3] and h[-1][1] - e[1] >= self.drop_ratio * e[2] for e in h):
             self.dropped_at[pid] = now
