@@ -16,8 +16,8 @@ OASIS 비전 — USB 웹캠 하나로 ① 홈캠 실시간 영상 ② 낙상 감
   OASIS_BACKEND_URL   백엔드 주소            예) http://192.168.10.69:8000
   OASIS_INACTIVE_SEC  비활동 알림까지 초      시연 30, 실사용 1800(30분)
   OASIS_FALL_LYING_SEC 쓰러진 뒤 누워 있는 시간 2
-  OASIS_FALL_DROP      서 있던 키 대비 엉덩이가 내려가야 하는 비율 0.25 (낮은 침대·매트로 쓰러져도 잡히게)
-  OASIS_FALL_WINDOW    그만큼 내려가는 데 걸리는 최대 시간(초) 1.5
+  OASIS_FALL_DROP      서 있던 키 대비 엉덩이가 내려가야 하는 비율 0.2 (낮은 침대·매트로 쓰러져도 잡히게)
+  OASIS_FALL_WINDOW    똑바로 선 자세 → 누운 자세로 바뀌는 데 걸리는 최대 시간(초) 1.2 (그냥 눕기와 구분)
   OASIS_STREAM_PORT   홈캠 영상 포트          5000
   OASIS_CAMERA        비상 모드 카메라 번호    0 (/dev/video0)
 
@@ -38,8 +38,8 @@ from flask import Flask, Response
 BACKEND_URL      = os.getenv("OASIS_BACKEND_URL", "http://192.168.10.69:8000").rstrip("/")
 INACTIVE_SEC     = float(os.getenv("OASIS_INACTIVE_SEC", "30"))
 FALL_LYING_SEC   = float(os.getenv("OASIS_FALL_LYING_SEC", "2"))
-FALL_DROP        = float(os.getenv("OASIS_FALL_DROP", "0.25"))     # 0.35 → 0.25: 낮은 침대로 쓰러지면 엉덩이가 덜 내려감
-FALL_WINDOW      = float(os.getenv("OASIS_FALL_WINDOW", "1.5"))
+FALL_DROP        = float(os.getenv("OASIS_FALL_DROP", "0.2"))     # 낮은 침대로 쓰러지면 엉덩이가 덜 내려감 (대신 몸통 회전 속도로 그냥 눕기와 구분)
+FALL_WINDOW      = float(os.getenv("OASIS_FALL_WINDOW", "1.2"))
 FALL_SHOW_SEC    = float(os.getenv("OASIS_FALL_SHOW_SEC", "10"))   # 낙상 확정 후 화면에 빨간 표시를 보여 주는 시간    # 1.0 → 1.5초: 몸이 침대에 걸치며 쓰러지는 경우
 STREAM_PORT      = int(os.getenv("OASIS_STREAM_PORT", "5000"))
 ALERT_COOLDOWN   = float(os.getenv("OASIS_ALERT_COOLDOWN", "60"))
@@ -91,7 +91,7 @@ class AlertSender:
 
 # ════════════════════════════════════════════════════════════
 #  낙상 감지 — 관절 좌표 기반
-#    1) 엉덩이가 1.5초 안에 '키의 25% 이상' 빠르게 내려감 (급격한 하강, OASIS_FALL_DROP·OASIS_FALL_WINDOW 로 조절)
+#    1) 똑바로 선 자세에서 1.2초 안에 누운 자세로 바뀌며 엉덩이가 '키의 20% 이상' 내려감 (OASIS_FALL_DROP·OASIS_FALL_WINDOW)
 #    2) 그 뒤 몸이 누운 자세(몸통 기울기 60도 이상 또는 가로로 긴 몸)로 FALL_LYING_SEC 이상 유지
 #    → 둘 다 만족하면 낙상. 천천히 눕는 것(침대)은 1)이 없어서 낙상으로 보지 않는다.
 # ════════════════════════════════════════════════════════════
@@ -124,16 +124,20 @@ class FallDetector:
     def update(self, pid: int, kp, bbox, now=None) -> bool:
         """한 프레임 갱신. 이번 프레임에 낙상이 '확정'되면 True"""
         now = time.time() if now is None else now
-        lying, _ = self.posture(kp, bbox)
-        h = self.hist.setdefault(pid, deque())          # (시각, 엉덩이y, 키, 누운 자세인가)
+        lying, angle = self.posture(kp, bbox)
+        bw, bh = max(bbox[2] - bbox[0], 1.0), max(bbox[3] - bbox[1], 1.0)
+        # 똑바로 선 자세: 몸통이 거의 세로(35도 미만)이고 사람 상자가 세로로 아주 긴 경우 (앉으면 덜 길다)
+        upright = angle is not None and angle < 35 and bh > 1.8 * bw   # 서 있으면 키가 폭의 2~3배, 앉으면 1.2~1.7배
+        h = self.hist.setdefault(pid, deque())          # (시각, 엉덩이y, 키, 똑바로 서 있었나)
         if min(kp[L_HIP][2], kp[R_HIP][2]) >= self.min_score:
             _, hip_y = self._mid(kp, L_HIP, R_HIP)
-            h.append((now, hip_y, max(bbox[3] - bbox[1], 1.0), lying))
+            h.append((now, hip_y, bh, upright))
         while h and now - h[0][0] > self.drop_window:
             h.popleft()
-        # 급격한 하강: drop_window 초 안에, '서 있던(누워 있지 않던)' 시점보다 엉덩이가 그때 키의 drop_ratio 이상 내려감
-        # → 누운 채 뒤척이는 건 시작 자세가 누운 자세라 해당 없음
-        if h and any(not e[3] and h[-1][1] - e[1] >= self.drop_ratio * e[2] for e in h):
+        # 쓰러짐 = drop_window 초 안에 '똑바로 서 있던 자세'에서 '누운 자세'로 한꺼번에 바뀌며 엉덩이가 내려감
+        #   · 그냥 눕기: 먼저 앉고(엉덩이만 내려감, 몸통은 세로) 그다음 천천히 눕는다 → 서 있던 시점이 창 밖이라 해당 없음
+        #   · 누운 채 뒤척이기: 시작 자세가 서 있는 자세가 아니라 해당 없음
+        if lying and h and any(e[3] and h[-1][1] - e[1] >= self.drop_ratio * e[2] for e in h):
             self.dropped_at[pid] = now
 
         if lying:
