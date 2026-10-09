@@ -203,6 +203,23 @@ async def set_wake_name(db: AsyncSession, name: str) -> str:
 _naming: dict[str, dict] = {}
 RENAME_RE = re.compile(r"이름(을|좀)?(바꾸|바꿔|바꿀|새로|다시|지어|정하|정해)")
 CANCEL_WORDS = ["안해", "안할래", "나중에", "됐어", "그냥둬", "하지마"]
+NAMING_TIMEOUT_SEC = 60              # 이름을 여쭤본 뒤 이 시간이 지나면 이름 짓기를 그만두고 평소 대화로
+NAME_YES = ["맞아", "맞다", "맞네", "맞어", "맞습", "맞지", "그래", "그렇지", "그렇다", "좋아", "좋다", "하모", "오냐"]
+
+
+def _strip_fillers(t: str) -> str:
+    """음성 인식 앞뒤에 붙는 '아', '어', '음' 같은 군말 제거 ('아어맞다' → '맞다')"""
+    return re.sub(r"^(아|어|음|으|에|저기|그)+(?=.)", "", t)
+
+
+def _naming_yes(t: str) -> bool:
+    core = _strip_fillers(t)
+    return t in YES_EXACT or core in YES_EXACT or (_has(NAME_YES, core) and not _has(["아니", "틀렸"], core))
+
+
+def _naming_cancel(t: str) -> bool:
+    """짧은 말에서만 취소로 본다 ('나중에 고양이 키우고 싶어' 같은 긴 말은 취소 아님)"""
+    return len(t) <= 8 and _has(CANCEL_WORDS, t)
 # 한 번에 새 이름까지 말할 때: "이름을 철수로 바꿔줘", "네 이름 철수로 해", "이제부터 철수라고 부를게"
 RENAME_TO_RE = [
     re.compile(r"이름(을|은|좀)?(?P<n>[가-힣A-Za-z]{2,6}?)(으로|로|라고)(바꿔|바꾸|바꿀|해|하자|할게|정해|정할게|부를게|불러)"),
@@ -253,7 +270,8 @@ async def reset_wake_name(db: AsyncSession) -> None:
 async def _naming_step(db: AsyncSession, session_id: str, t: str, text: str) -> str:
     """이름 짓기 대화 한 단계 → 오아시스가 할 말"""
     state = _naming.setdefault(session_id, {"stage": "ask"})
-    if _has(CANCEL_WORDS, t):
+    state["at"] = time.time()
+    if _naming_cancel(t):
         _naming.pop(session_id, None)
         if not await is_wake_name_set(db):
             await set_wake_name(db, DEFAULT_WAKE_NAME)
@@ -261,7 +279,7 @@ async def _naming_step(db: AsyncSession, session_id: str, t: str, text: str) -> 
         return f"알겠어요. 그럼 '{_calling(name)}' 하고 불러 주세요."
 
     if state["stage"] == "confirm":
-        if t in YES_EXACT or _has(["맞아", "그래", "좋아", "응"], t):
+        if _naming_yes(t):
             name = await set_wake_name(db, state["name"])
             _naming.pop(session_id, None)
             _awake_until[session_id] = time.time() + WAKE_WINDOW_SEC
@@ -269,7 +287,9 @@ async def _naming_step(db: AsyncSession, session_id: str, t: str, text: str) -> 
         if _has(NO_WORDS, t) or "틀렸" in t or "다시" in t:
             state.update(stage="ask")
             return "그럼 뭐라고 불러 주실래요? 다시 한 번 말씀해 주세요."
-        # 확인 대신 새 이름을 말씀하신 경우 → 새 이름으로 다시 확인
+        # 확인 대신 새 이름을 말씀하신 경우 → 새 이름으로 다시 확인 (짧은 말일 때만)
+        if len(extract_name(text)) > 6:
+            return f"'{state['name']}'가 맞으면 '응', 아니면 '아니'라고 말씀해 주세요."
 
     candidate = extract_name(text)
     try:
@@ -821,9 +841,12 @@ async def reply(db: AsyncSession, text: str, session_id: str, senior_id: int,
     urgent_now = _has(EMERGENCY_WORDS, t) and "뻔" not in t
     if not urgent_now and len(t) >= 1:
         first_time = require_wake and not await is_wake_name_set(db)
+        st = _naming.get(session_id)
+        if st and not first_time and time.time() - st.get("at", time.time()) > NAMING_TIMEOUT_SEC:
+            _naming.pop(session_id, None)          # 오래 전에 여쭤본 이름 짓기는 끝내고 평소 대화로
         if session_id in _naming or first_time:
             if first_time and session_id not in _naming:
-                _naming[session_id] = {"stage": "ask"}
+                _naming[session_id] = {"stage": "ask", "at": time.time()}
                 answer = "안녕하세요! 저를 뭐라고 불러 주실래요? 부르기 편한 이름을 지어 주세요."
             else:
                 answer = await _naming_step(db, session_id, t, text)
@@ -861,10 +884,10 @@ async def reply(db: AsyncSession, text: str, session_id: str, senior_id: int,
         if new_name:                             # "이름을 철수로 바꿔줘" → 바로 확인
             try:
                 new_name = validate_wake_name(new_name)
-                _naming[session_id] = {"stage": "confirm", "name": new_name}
+                _naming[session_id] = {"stage": "confirm", "name": new_name, "at": time.time()}
                 answer = f"'{new_name}'라고 부르시는 거 맞아요?"
             except ValueError:
-                _naming[session_id] = {"stage": "ask"}
+                _naming[session_id] = {"stage": "ask", "at": time.time()}
                 answer = "좋아요. 그럼 뭐라고 불러 주실래요?"
             await _save(db, session_id, senior_id, "user", text, ctype)
             await _save(db, session_id, senior_id, "assistant", answer, ctype)
@@ -872,7 +895,7 @@ async def reply(db: AsyncSession, text: str, session_id: str, senior_id: int,
                     "wake_name": wake_name, "latency_ms": int((time.perf_counter() - started) * 1000),
                     "llm_ms": 0}
         if RENAME_RE.search(t):                  # "네 이름 바꾸고 싶어"
-            _naming[session_id] = {"stage": "ask"}
+            _naming[session_id] = {"stage": "ask", "at": time.time()}
             answer = "좋아요. 그럼 뭐라고 불러 주실래요?"
             await _save(db, session_id, senior_id, "user", text, ctype)
             await _save(db, session_id, senior_id, "assistant", answer, ctype)
