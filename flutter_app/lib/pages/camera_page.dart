@@ -1,50 +1,11 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:webview_flutter/webview_flutter.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import '../data/api_service.dart';
+import '../widgets/mjpeg_view.dart';
 
 final String _streamUrl = dotenv.env['CAMERA_STREAM_URL'] ?? 'http://localhost:5000/';
 
-// iOS WebView(WebKit)는 이 서버의 MJPEG 연속 영상을 재생하지 못한다.
-// 그래서 /snapshot(사진 한 장)을 빠르게 이어 받아 보여준다. 새 사진이 다 받아진 뒤에 바꿔서 깜빡임이 없다.
-String get _snapshotUrl => _streamUrl.endsWith('/video')
-    ? _streamUrl.replaceFirst(RegExp(r'/video$'), '/snapshot')
-    : '${_streamUrl.replaceFirst(RegExp(r'/$'), '')}/snapshot';
-
-// 맥 서버가 파이 연속 영상에서 최신 사진을 뽑아 주는 주소 (routers/camera.py 의 /camera/live.jpg)
-String get _relayUrl => '$baseUrl/camera/live.jpg';
-
-String get _streamHtml => '''
-<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
-<style>html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#191F28}
-img{width:100%;height:100%;object-fit:cover;display:block}</style></head>
-<body><img id="v" alt="">
-<script>
-  // 파이 카메라에 /snapshot 이 있으면 바로 받고, 없으면(연속 영상만 주는 카메라) 맥 서버 중계로 받는다
-  var sources = ['$_snapshotUrl', '$_relayUrl'];
-  var pick = 0, fails = 0;
-  var view = document.getElementById('v');
-  var seq = 0;
-  // 응답이 끝내 안 오는 경우(파이가 와이파이에서 잠깐 빠졌을 때 등)를 대비해 3초가 지나면 새로 요청한다
-  function next() {
-    var my = ++seq, done = false;
-    var img = new Image();
-    var guard = setTimeout(function () { if (!done && my === seq) { done = true; fail(); } }, 3000);
-    function fail() {
-      fails++;
-      if (fails >= 2) { pick = (pick + 1) % sources.length; fails = 0; }
-      setTimeout(next, 700);
-    }
-    img.onload = function () {
-      if (done || my !== seq) return;
-      done = true; clearTimeout(guard); fails = 0; view.src = img.src; setTimeout(next, 60);
-    };
-    img.onerror = function () { if (done || my !== seq) return; done = true; clearTimeout(guard); fail(); };
-    img.src = sources[pick] + '?t=' + Date.now();
-  }
-  next();
-</script></body></html>''';
 const int _refreshInterval = 30;
 
 class CameraPage extends StatefulWidget {
@@ -58,7 +19,6 @@ class _CameraPageState extends State<CameraPage>
     with TickerProviderStateMixin {
   // ── 카메라 ──────────────────────────────────────────────────────────────────
   bool _isConnected = false;
-  late WebViewController _webViewController;
 
   // ── 데이터 ──────────────────────────────────────────────────────────────────
   List<Map> _allAlerts = [];
@@ -114,41 +74,10 @@ class _CameraPageState extends State<CameraPage>
     _startTimers();
   }
 
-  void _initCamera() {
-    _webViewController = WebViewController()
-      ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setBackgroundColor(const Color(0xFF191F28))
-      ..enableZoom(false)
-      ..setNavigationDelegate(NavigationDelegate(
-        onPageStarted: (_) {
-          if (mounted) setState(() => _isConnected = true);
-          // style 태그를 head에 주입 → 이미지 생성 즉시 적용
-          _webViewController.runJavaScript('''
-            (function() {
-              var s = document.createElement('style');
-              s.textContent = 'html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#000;} img{width:100%!important;height:100%!important;object-fit:fill!important;display:block!important;}';
-              if (document.head) document.head.appendChild(s);
-              else document.addEventListener("DOMContentLoaded", function(){ document.head.appendChild(s); });
-            })();
-          ''');
-        },
-        onPageFinished: (_) async {
-          // 페이지가 완전히 로드됐으면 JSON 에러인지 확인
-          try {
-            final result = await _webViewController.runJavaScriptReturningResult(
-              "document.body ? document.body.innerText.trim().startsWith('{') : false",
-            );
-            if (mounted) setState(() => _isConnected = result.toString() != 'true');
-          } catch (_) {
-            // MJPEG 스트리밍은 페이지 완료 없이 계속 전송 → 연결 유지
-          }
-        },
-        onWebResourceError: (_) {
-          if (mounted) setState(() => _isConnected = false);
-        },
-      ))
-      ..loadHtmlString(_streamHtml, baseUrl: _streamUrl);
-  }
+  // 홈캠은 MjpegView 가 파이 /video 연결 하나로 계속 받는다 (lib/widgets/mjpeg_view.dart)
+  int _camKey = 0;
+  void _initCamera() {}
+  void _reconnectCamera() => setState(() => _camKey++);
 
   void _initAnimations() {
     _pulseController = AnimationController(
@@ -361,7 +290,11 @@ class _CameraPageState extends State<CameraPage>
           height: h,
           child: Container(
             color: const Color(0xFF191F28),
-            child: WebViewWidget(controller: _webViewController),
+            child: MjpegView(
+              key: ValueKey(_camKey),
+              url: _streamUrl,
+              onStatus: (ok) { if (mounted && ok != _isConnected) setState(() => _isConnected = ok); },
+            ),
           ),
         ),
         // Not Found / 미연결 시 네이비 블루 오버레이
@@ -403,7 +336,7 @@ class _CameraPageState extends State<CameraPage>
           child: GestureDetector(
             onTap: _isConnected
                 ? null
-                : () => _webViewController.loadHtmlString(_streamHtml, baseUrl: _streamUrl),
+                : _reconnectCamera,
             child: AnimatedBuilder(
               animation: _pulseAnim,
               builder: (_, __) => Container(
