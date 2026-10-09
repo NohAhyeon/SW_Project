@@ -25,14 +25,22 @@ img{width:100%;height:100%;object-fit:cover;display:block}</style></head>
   var sources = ['$_snapshotUrl', '$_relayUrl'];
   var pick = 0, fails = 0;
   var view = document.getElementById('v');
+  var seq = 0;
+  // 응답이 끝내 안 오는 경우(파이가 와이파이에서 잠깐 빠졌을 때 등)를 대비해 3초가 지나면 새로 요청한다
   function next() {
+    var my = ++seq, done = false;
     var img = new Image();
-    img.onload = function () { fails = 0; view.src = img.src; setTimeout(next, 60); };
-    img.onerror = function () {
+    var guard = setTimeout(function () { if (!done && my === seq) { done = true; fail(); } }, 3000);
+    function fail() {
       fails++;
       if (fails >= 2) { pick = (pick + 1) % sources.length; fails = 0; }
       setTimeout(next, 700);
+    }
+    img.onload = function () {
+      if (done || my !== seq) return;
+      done = true; clearTimeout(guard); fails = 0; view.src = img.src; setTimeout(next, 60);
     };
+    img.onerror = function () { if (done || my !== seq) return; done = true; clearTimeout(guard); fail(); };
     img.src = sources[pick] + '?t=' + Date.now();
   }
   next();
