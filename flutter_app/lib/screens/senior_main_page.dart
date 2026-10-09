@@ -25,6 +25,19 @@ const _done      = Color(0xFF4E5968);
 const _doneSoft  = Color(0xFFF2F4F6);
 const _danger    = Color(0xFFE42939);
 const _dangerSoft= Color(0xFFFDEEEF);
+// 챗봇 이름: 어르신이 음성으로 바꿀 수 있으므로 앱 전체가 5초마다 같은 값을 본다
+final ValueNotifier<String?> wakeNameNotifier = ValueNotifier<String?>(null);
+
+class _BotName extends StatelessWidget {
+  final TextStyle style;
+  const _BotName({required this.style});
+  @override
+  Widget build(BuildContext context) => ValueListenableBuilder<String?>(
+        valueListenable: wakeNameNotifier,
+        builder: (_, name, __) => Text(name ?? '오아시스', style: style),
+      );
+}
+
 const _heroGradient = LinearGradient(
   colors: [Color(0xFF2F6FEB), Color(0xFF4A86F2)],
   begin: Alignment.topLeft,
@@ -48,6 +61,26 @@ class SeniorMainPage extends StatefulWidget {
 }
 
 class _SeniorMainPageState extends State<SeniorMainPage> {
+  Timer? _nameTimer;
+
+  @override
+  void initState() {
+    super.initState();
+    _refreshName();
+    _nameTimer = Timer.periodic(const Duration(seconds: 5), (_) => _refreshName());
+  }
+
+  @override
+  void dispose() {
+    _nameTimer?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _refreshName() async {
+    final n = await ApiService.getWakeName();
+    if (n != null && n != wakeNameNotifier.value) wakeNameNotifier.value = n;
+  }
+
   int  _tab        = 0;
   bool _seniorView = false;
   int  _refreshKey = 0;
@@ -216,8 +249,15 @@ class _HomeTabState extends State<_HomeTab> {
   String? _wakeName;
   bool _loading = true;
 
+  void _onName() {
+    if (mounted && wakeNameNotifier.value != null) setState(() => _wakeName = wakeNameNotifier.value);
+  }
+
   @override
-  void initState() { super.initState(); _load(); }
+  void initState() { super.initState(); wakeNameNotifier.addListener(_onName); _load(); }
+
+  @override
+  void dispose() { wakeNameNotifier.removeListener(_onName); super.dispose(); }
 
   @override
   void didUpdateWidget(_HomeTab old) {
@@ -237,6 +277,7 @@ class _HomeTabState extends State<_HomeTab> {
       _alerts = alerts; _loading = false;
     });
     final wakeName = await ApiService.getWakeName();
+    if (wakeName != null) wakeNameNotifier.value = wakeName;
     if (mounted) setState(() => _wakeName = wakeName);
     // 요약은 AI가 만들어서 조금 걸리므로 화면을 먼저 보여준 뒤 채운다
     final summary = await ApiService.getDailySummary();
@@ -2591,7 +2632,7 @@ class _LogHeader extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('오아시스',
+                _BotName(
                     style: TextStyle(
                         fontSize: senior ? 22 : 18,
                         fontWeight: FontWeight.w800,
@@ -2644,7 +2685,7 @@ class _OasisProfileCard extends StatelessWidget {
         children: [
           _OasisAvatar(size: senior ? 112 : 96, border: 4),
           const SizedBox(height: 14),
-          Text('오아시스',
+          _BotName(
               style: TextStyle(
                   fontSize: senior ? 26 : 22,
                   fontWeight: FontWeight.w800,
@@ -2803,7 +2844,7 @@ class _ChatBubble extends StatelessWidget {
               children: [
                 Padding(
                   padding: const EdgeInsets.only(left: 4, bottom: 4),
-                  child: Text('오아시스',
+                  child: _BotName(
                       style: TextStyle(fontSize: senior ? 14 : 12, color: _text3, fontWeight: FontWeight.w600)),
                 ),
                 Row(
@@ -3156,14 +3197,26 @@ class _WakeNameRow extends StatefulWidget {
 class _WakeNameRowState extends State<_WakeNameRow> {
   String? _name;
 
+  void _onName() {
+    if (mounted && wakeNameNotifier.value != null) setState(() => _name = wakeNameNotifier.value);
+  }
+
   @override
   void initState() {
     super.initState();
+    wakeNameNotifier.addListener(_onName);
     _load();
+  }
+
+  @override
+  void dispose() {
+    wakeNameNotifier.removeListener(_onName);
+    super.dispose();
   }
 
   Future<void> _load() async {
     final n = await ApiService.getWakeName();
+    if (n != null) wakeNameNotifier.value = n;
     if (mounted) setState(() => _name = n);
   }
 
