@@ -890,9 +890,51 @@ async def _send_senior_message(db: AsyncSession, senior_id: int, to: str, text: 
 #  메인 진입점
 # ════════════════════════════════════════════════════════════
 async def _save(db: AsyncSession, session_id: str, senior_id: int, role: str, text: str, ctype: str):
-    db.add(Conversation(session_id=session_id, senior_id=senior_id, role=role,
-                        content=encrypt(text), type=ctype))
+    row = Conversation(session_id=session_id, senior_id=senior_id, role=role, content=encrypt(text), type=ctype)
+    db.add(row)
     await db.commit()
+    if role == "user" and TIDY_LOG:                # 기록용 문장 다듬기는 대답을 돌려준 뒤 뒤에서
+        asyncio.create_task(_tidy_later(row.id, text))
+
+
+# ── 기록용 문장 다듬기 ───────────────────────────────────────
+#   음성 인식(SenseVoice 등)이 사투리를 소리 나는 대로 적은 말("지금 몇 쉬고?", "와일이 어지럽나")을
+#   보호자가 읽기 쉬운 문장으로 고쳐 저장한다. 대답 만드는 흐름에는 원래 말을 그대로 쓴다.
+#   · 뜻은 바꾸지 않고 받아쓰기 오류·띄어쓰기만 고친다 (사투리 말투는 살림)
+#   · AI 가 실패하거나 엉뚱하게 길어지면 원래 말을 그대로 둔다
+TIDY_LOG = os.getenv("TIDY_LOG", "1") != "0"
+
+
+async def _tidy_text(text: str) -> str | None:
+    if len(_norm(text)) < 3:
+        return None
+    prompt = ("아래는 부산·경상도 어르신이 말한 것을 음성 인식이 받아 적은 문장이야. 소리 나는 대로 잘못 적힌 "
+              "글자와 띄어쓰기만 고쳐서 자연스러운 한 문장으로 써. 뜻을 바꾸거나 말을 보태지 말고, "
+              "사투리 말투(~노, ~나, 묵다 등)는 살려. 고칠 게 없으면 그대로 써. 고친 문장만 답해.\n"
+              "예) 지금 몇 쉬고? → 지금 몇 시고?\n예) 와일이 어지럽나 → 와 이리 어지럽노\n"
+              "문장: " + text)
+    out, source, _ = await _ask_llm([{"role": "user", "content": prompt}])
+    out = (out or "").strip().strip('"').split("\n")[0].strip()
+    if source == "fallback" or out == MSG_LLM_FAIL or not out:
+        return None
+    if len(out) > len(text) * 1.6 + 6 or len(out) < len(text) * 0.5:   # 말을 보태거나 크게 줄였으면 버림
+        return None
+    return out if out != text else None
+
+
+async def _tidy_later(conv_id: int, text: str) -> None:
+    try:
+        tidy = await _tidy_text(text)
+        if not tidy:
+            return
+        async with AsyncSessionLocal() as db:
+            row = await db.get(Conversation, conv_id)
+            if row:
+                row.content = encrypt(tidy)
+                await db.commit()
+                print(f"[기록 다듬기] {text} → {tidy}")
+    except Exception as e:
+        print(f"[기록 다듬기 실패] {e}")
 
 
 async def reply(db: AsyncSession, text: str, session_id: str, senior_id: int,
