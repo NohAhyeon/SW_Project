@@ -702,6 +702,38 @@ async def proactive(db: AsyncSession, session_id: str, senior_id: int, force: st
     return {"say": say, "kind": kind}
 
 
+# ── 위험 안내 (낙상·가스) ─────────────────────────────────────
+#   센서·카메라가 위험을 감지하면 기기가 2초 안에 소리로 어르신께 알린다 (밤·조용히 중에도 말함)
+URGENT_TYPES = {"낙상": "fall", "낙상감지": "fall", "가스": "gas", "가스감지": "gas"}
+URGENT_MAX_AGE_SEC = 120                               # 서버를 켜기 전에 쌓인 오래된 알림은 말하지 않음
+_announced: set[int] = set()
+
+
+async def urgent(db: AsyncSession, session_id: str, senior_id: int) -> dict:
+    """기기가 2초마다 호출: 아직 안내하지 않은 낙상·가스 알림이 있으면 바로 말할 문장을 준다"""
+    res = await db.execute(select(Alert).where(Alert.is_resolved == False).order_by(Alert.id))   # noqa: E712
+    now = datetime.now()
+    for a in res.scalars().all():
+        kind = URGENT_TYPES.get(a.type or "")
+        if not kind or a.id in _announced:
+            continue
+        _announced.add(a.id)
+        if a.created_at and (now - a.created_at).total_seconds() > URGENT_MAX_AGE_SEC:
+            continue
+        who = (await _profile_for(db, senior_id))["호칭"]
+        if kind == "fall":
+            say = (f"{who}, 넘어지셨어요? 보호자분께 바로 알렸어요. "
+                   "많이 아프시면 '살려줘' 하고 말씀해 주세요.")
+        else:
+            say = (f"{who}, 가스가 감지됐어요! 가스 밸브를 잠그고 창문을 열어 주세요. "
+                   "보호자분께 바로 알렸어요.")
+        _awake_until[session_id] = time.time() + WAKE_WINDOW_SEC * 2      # 이름 없이 바로 대답하실 수 있게
+        _last_reply[session_id] = say
+        await _save(db, session_id, senior_id, "assistant", say, "긴급")
+        return {"say": say, "kind": kind, "alert_id": a.id}
+    return {"say": None, "kind": None}
+
+
 # ── 보호자 일일 요약 ─────────────────────────────────────────
 _summary_cache: dict[tuple, tuple] = {}
 

@@ -6,6 +6,7 @@ OASIS 파이 ↔ 대화 엔진 연결 모듈 (아현님용) — my_ai_project/ma
   · 약·일정 질문은 DB 값으로 대답, "먹었어" → 복약 기록, 위급한 말 → 보호자 알림
   · "뭐라고?" → 직전 대답을 짧게, 천천히 다시
   · 먼저 말 걸기 (약 시간 "드셨어요?" / 아침 인사 / 지난 대화 기억으로 안부)
+  · 낙상·가스가 감지되면 2초 안에 스피커로 안내
   · 대화 저장은 서버가 한다 → 기존 save_message() 호출은 지운다
 
 main.py 에 붙이는 법 (세 군데)
@@ -31,11 +32,12 @@ import requests
 
 class OasisBridge:
     def __init__(self, backend_url, session_id="oasis-device-1", senior_id=4,
-                 filler_after_sec=1.5, proactive_every_sec=30, headers=None):
+                 filler_after_sec=1.5, proactive_every_sec=30, urgent_every_sec=2, headers=None):
         self.url = backend_url.rstrip("/")
         self.session_id, self.senior_id = session_id, senior_id
         self.filler_after_sec = filler_after_sec
         self.proactive_every_sec = proactive_every_sec
+        self.urgent_every_sec = urgent_every_sec
         self.headers = headers or {}
         self._lock = threading.Lock()          # 대답과 먼저 말 걸기가 겹치지 않게
 
@@ -86,6 +88,22 @@ class OasisBridge:
                         self._speak(speak, data["say"])
         threading.Thread(target=loop, daemon=True).start()
         print(f"[먼저 말 걸기] {self.proactive_every_sec}초마다 확인 시작")
+
+        def urgent_loop():
+            """낙상·가스가 감지되면 2초 안에 스피커로 안내 (다른 말 중이면 끝나고 바로)"""
+            while True:
+                time.sleep(self.urgent_every_sec)
+                try:
+                    data = requests.get(f"{self.url}/talk/urgent", headers=self.headers, timeout=5,
+                                        params={"session_id": self.session_id, "senior_id": self.senior_id}).json()
+                except Exception:
+                    continue
+                if data.get("say"):
+                    with self._lock:
+                        print(f"[위험 안내] {data.get('kind')} → {data['say']}")
+                        self._speak(speak, data["say"])
+        threading.Thread(target=urgent_loop, daemon=True).start()
+        print(f"[위험 안내] {self.urgent_every_sec}초마다 낙상·가스 확인 시작")
 
     @staticmethod
     def _speak(speak, text, slow=False):

@@ -103,3 +103,9 @@ async def post_message(body: GuardianMessage, db: AsyncSession = Depends(get_db)
         return await elder_engine.send_guardian_message(db, body.senior_id, body.text, body.sender)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+
+
+# 위험 안내: 기기가 2초마다 호출 → 새 낙상·가스 알림이 있으면 say 를 바로 말한다
+@router.get("/urgent")
+async def get_urgent(session_id: str = "oasis-device-1", senior_id: int = 4, db: AsyncSession = Depends(get_db)):
+    return await elder_engine.urgent(db, session_id, senior_id)
