@@ -203,6 +203,11 @@ async def set_wake_name(db: AsyncSession, name: str) -> str:
 _naming: dict[str, dict] = {}
 RENAME_RE = re.compile(r"이름(을|좀)?(바꾸|바꿔|바꿀|새로|다시|지어|정하|정해)")
 CANCEL_WORDS = ["안해", "안할래", "나중에", "됐어", "그냥둬", "하지마"]
+# 한 번에 새 이름까지 말할 때: "이름을 철수로 바꿔줘", "네 이름 철수로 해", "이제부터 철수라고 부를게"
+RENAME_TO_RE = [
+    re.compile(r"이름(을|은|좀)?(?P<n>[가-힣A-Za-z]{2,6}?)(으로|로|라고)(바꿔|바꾸|바꿀|해|하자|할게|정해|정할게|부를게|불러)"),
+    re.compile(r"(이제부터|앞으로|지금부터)(너|넌|너는|니|니는)?(?P<n>[가-힣A-Za-z]{2,6}?)(라고)(부를게|불러줄게|할게|해)"),
+]
 
 
 def _calling(name: str) -> str:
@@ -852,6 +857,20 @@ async def reply(db: AsyncSession, text: str, session_id: str, senior_id: int,
                 return {"respond": True, "reply": answer, "intent": "wake", "source": "rule",
                         "wake_name": wake_name, "latency_ms": int((time.perf_counter() - started) * 1000),
                         "llm_ms": 0}
+        new_name = next((m.group("n") for r in RENAME_TO_RE if (m := r.search(t))), None)
+        if new_name:                             # "이름을 철수로 바꿔줘" → 바로 확인
+            try:
+                new_name = validate_wake_name(new_name)
+                _naming[session_id] = {"stage": "confirm", "name": new_name}
+                answer = f"'{new_name}'라고 부르시는 거 맞아요?"
+            except ValueError:
+                _naming[session_id] = {"stage": "ask"}
+                answer = "좋아요. 그럼 뭐라고 불러 주실래요?"
+            await _save(db, session_id, senior_id, "user", text, ctype)
+            await _save(db, session_id, senior_id, "assistant", answer, ctype)
+            return {"respond": True, "reply": answer, "intent": "naming", "source": "rule",
+                    "wake_name": wake_name, "latency_ms": int((time.perf_counter() - started) * 1000),
+                    "llm_ms": 0}
         if RENAME_RE.search(t):                  # "네 이름 바꾸고 싶어"
             _naming[session_id] = {"stage": "ask"}
             answer = "좋아요. 그럼 뭐라고 불러 주실래요?"
