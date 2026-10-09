@@ -39,7 +39,8 @@ BACKEND_URL      = os.getenv("OASIS_BACKEND_URL", "http://192.168.10.69:8000").r
 INACTIVE_SEC     = float(os.getenv("OASIS_INACTIVE_SEC", "30"))
 FALL_LYING_SEC   = float(os.getenv("OASIS_FALL_LYING_SEC", "2"))
 FALL_DROP        = float(os.getenv("OASIS_FALL_DROP", "0.25"))     # 0.35 → 0.25: 낮은 침대로 쓰러지면 엉덩이가 덜 내려감
-FALL_WINDOW      = float(os.getenv("OASIS_FALL_WINDOW", "1.5"))    # 1.0 → 1.5초: 몸이 침대에 걸치며 쓰러지는 경우
+FALL_WINDOW      = float(os.getenv("OASIS_FALL_WINDOW", "1.5"))
+FALL_SHOW_SEC    = float(os.getenv("OASIS_FALL_SHOW_SEC", "10"))   # 낙상 확정 후 화면에 빨간 표시를 보여 주는 시간    # 1.0 → 1.5초: 몸이 침대에 걸치며 쓰러지는 경우
 STREAM_PORT      = int(os.getenv("OASIS_STREAM_PORT", "5000"))
 ALERT_COOLDOWN   = float(os.getenv("OASIS_ALERT_COOLDOWN", "60"))
 NO_HAILO         = os.getenv("OASIS_NO_HAILO") == "1"
@@ -103,8 +104,7 @@ class FallDetector:
         self.dropped_at: dict[int, float] = {}
         self.lying_since: dict[int, float] = {}
         self.last_status: dict[int, str] = {}
-        self.fallen_at: dict[int, float] = {}    # 낙상 확정 시각 — 일어날 때까지 화면에 'FALL'(빨강) 유지
-        self.up_since: dict[int, float] = {}
+        self.fallen_at: dict[int, float] = {}    # 낙상 확정 시각 — FALL_SHOW_SEC 동안 화면에 'FALL'(빨강) 표시
 
     @staticmethod
     def _mid(kp, a, b):
@@ -147,16 +147,9 @@ class FallDetector:
         if fallen:
             self.dropped_at.pop(pid, None)       # 같은 낙상으로 중복 알림 방지
             self.fallen_at[pid] = now
-        # 낙상 표시 유지: 확정된 뒤에는 2초 넘게 일어서 있을 때까지 빨간색으로 보여 준다
-        if pid in self.fallen_at:
-            if lying:
-                self.up_since.pop(pid, None)
-            else:
-                self.up_since.setdefault(pid, now)
-                if now - self.up_since[pid] > 2.0:
-                    self.fallen_at.pop(pid, None)
-                    self.up_since.pop(pid, None)
-        self.last_status[pid] = "FALL" if pid in self.fallen_at else ("LYING" if lying else "OK")
+        # 낙상 표시: 확정된 뒤 FALL_SHOW_SEC(기본 10초) 동안 빨간색, 그 뒤엔 평소처럼 (누움=노랑, 서 있음=파랑)
+        showing = now - self.fallen_at.get(pid, -1e9) < FALL_SHOW_SEC
+        self.last_status[pid] = "FALL" if showing else ("LYING" if lying else "OK")
         return fallen
 
 
