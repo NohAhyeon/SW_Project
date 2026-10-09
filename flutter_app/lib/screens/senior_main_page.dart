@@ -414,6 +414,9 @@ class _HomeTabState extends State<_HomeTab> {
               // ── 오늘의 어르신 (보호자 화면: 대화 엔진 일일 요약) ──
               if (!s && _summary != null) _DailySummaryCard(data: _summary!),
 
+              // ── 어르신께 메시지 (보호자 화면: 기기가 읽어 드리고 답장을 받아 둠) ──
+              if (!s) const _MessageCard(),
+
               // ── 2. 오늘 챙길 것 ─────────────────────────
               _HomeCard(
                 padding: const EdgeInsets.fromLTRB(22, 22, 22, 10),
@@ -579,6 +582,168 @@ class _DailySummaryCard extends StatelessWidget {
                   ]),
                 )),
           ],
+        ],
+      ),
+    );
+  }
+}
+
+// ── 어르신께 메시지: 보호자가 쓰면 기기가 소리로 읽어 드리고, 어르신 답장이 여기에 보인다
+class _MessageCard extends StatefulWidget {
+  const _MessageCard();
+  @override
+  State<_MessageCard> createState() => _MessageCardState();
+}
+
+class _MessageCardState extends State<_MessageCard> {
+  final _ctrl = TextEditingController();
+  List<Map<String, dynamic>> _items = [];
+  Timer? _timer;
+  bool _sending = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+    _timer = Timer.periodic(const Duration(seconds: 5), (_) => _load());   // 읽음·답장 표시 갱신
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _load() async {
+    final items = await ApiService.getMessages();
+    if (mounted) setState(() => _items = items);
+  }
+
+  Future<void> _send() async {
+    final text = _ctrl.text.trim();
+    if (text.isEmpty || _sending) return;
+    setState(() { _sending = true; _error = null; });
+    final err = await ApiService.sendMessage(text);
+    if (!mounted) return;
+    setState(() { _sending = false; _error = err; });
+    if (err == null) {
+      _ctrl.clear();
+      FocusScope.of(context).unfocus();
+      _load();
+    }
+  }
+
+  String _hm(dynamic v) {
+    final t = v?.toString() ?? '';
+    return t.length >= 16 ? t.substring(11, 16) : '';
+  }
+
+  Widget _bubble(String text, {required bool mine, String? meta}) => Align(
+        alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
+        child: Column(
+          crossAxisAlignment: mine ? CrossAxisAlignment.end : CrossAxisAlignment.start,
+          children: [
+            Container(
+              constraints: const BoxConstraints(maxWidth: 260),
+              margin: const EdgeInsets.only(top: 8),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: mine ? _brand : _bg,
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Text(text,
+                  style: TextStyle(fontSize: 15, height: 1.4, color: mine ? Colors.white : _text1)),
+            ),
+            if (meta != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 4, left: 4, right: 4),
+                child: Text(meta, style: const TextStyle(fontSize: 12, color: _text3)),
+              ),
+          ],
+        ),
+      );
+
+  List<Widget> _thread() {
+    final out = <Widget>[];
+    for (final m in _items.length > 4 ? _items.sublist(_items.length - 4) : _items) {
+      if (m['from'] == 'guardian') {
+        final delivered = m['delivered_at'] != null;
+        out.add(_bubble(m['text']?.toString() ?? '', mine: true,
+            meta: delivered ? '${_hm(m['delivered_at'])} 읽어 드렸어요' : '기기에서 곧 읽어 드려요'));
+        final reply = m['reply']?.toString();
+        if (reply != null && reply.isNotEmpty) {
+          out.add(_bubble(reply, mine: false, meta: '어르신 답장 · ${_hm(m['reply_at'])}'));
+        }
+      } else {
+        final to = m['sender']?.toString() ?? '';
+        out.add(_bubble(m['text']?.toString() ?? '', mine: false,
+            meta: '어르신이 ${to.isEmpty ? '' : '$to에게 '}보낸 말 · ${_hm(m['created_at'])}'));
+      }
+    }
+    return out;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _HomeCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('어르신께 메시지',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.w800, letterSpacing: -0.3, color: _text1)),
+          const SizedBox(height: 4),
+          const Text('기기가 소리로 읽어 드리고, 어르신 답장을 받아 와요.',
+              style: TextStyle(fontSize: 13, color: _text3)),
+          if (_items.isNotEmpty) ...[
+            const SizedBox(height: 6),
+            ..._thread(),
+          ],
+          const SizedBox(height: 14),
+          Row(children: [
+            Expanded(
+              child: TextField(
+                controller: _ctrl,
+                maxLength: 100,
+                textInputAction: TextInputAction.send,
+                onSubmitted: (_) => _send(),
+                style: const TextStyle(fontSize: 15, color: _text1),
+                decoration: InputDecoration(
+                  hintText: '예) 엄마, 저녁 꼭 챙겨 드세요',
+                  hintStyle: const TextStyle(color: _text4),
+                  counterText: '',
+                  filled: true,
+                  fillColor: _bg,
+                  isDense: true,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 13),
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            SizedBox(
+              height: 46,
+              child: ElevatedButton(
+                onPressed: _sending ? null : _send,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: _brand,
+                  foregroundColor: Colors.white,
+                  elevation: 0,
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                ),
+                child: Text(_sending ? '보내는 중' : '보내기',
+                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w700)),
+              ),
+            ),
+          ]),
+          if (_error != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 8),
+              child: Text(_error!, style: const TextStyle(fontSize: 13, color: _danger)),
+            ),
         ],
       ),
     );

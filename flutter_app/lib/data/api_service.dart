@@ -294,6 +294,37 @@ class ApiService {
     return null;
   }
 
+  // ── 보호자 ↔ 어르신 메시지 (기기가 읽어 드리고 답장을 받아 둠) ──
+  static Future<List<Map<String, dynamic>>> getMessages({int seniorId = 4}) async {
+    try {
+      final res = await http.get(Uri.parse('$baseUrl/talk/messages?senior_id=$seniorId'))
+          .timeout(const Duration(seconds: 8));
+      if (res.statusCode == 200) {
+        final List data = jsonDecode(utf8.decode(res.bodyBytes))['messages'] ?? [];
+        return data.map((e) => Map<String, dynamic>.from(e)).toList();
+      }
+    } catch (e) {
+      print('메시지 조회 오류: $e');
+    }
+    return [];
+  }
+
+  /// 성공하면 null, 실패하면 사용자에게 보여줄 오류 문구
+  static Future<String?> sendMessage(String text, {int seniorId = 4, String sender = ''}) async {
+    try {
+      final res = await http.post(
+        Uri.parse('$baseUrl/talk/messages'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'text': text, 'senior_id': seniorId, 'sender': sender}),
+      ).timeout(const Duration(seconds: 8));
+      if (res.statusCode == 200) return null;
+      final body = jsonDecode(utf8.decode(res.bodyBytes));
+      return (body['detail'] ?? '메시지를 보내지 못했어요.').toString();
+    } catch (e) {
+      return '서버에 연결할 수 없어요.';
+    }
+  }
+
   static Future<List<Map>> getAlerts() async {
     if (_useMock) return [
       {"time": "2026-06-22T08:00:00", "content": "비활동 감지", "status": "처리 완료", "type": "비활동", "id": 1},

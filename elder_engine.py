@@ -25,6 +25,7 @@ from dotenv import load_dotenv
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import dialect
 from crypto import decrypt, encrypt
 from database import AsyncSessionLocal
 from difflib import SequenceMatcher
@@ -71,7 +72,7 @@ EMERGENCY_WORDS = ["살려", "도와줘", "도와주세요", "쓰러졌", "쓰�
                    "일어나지를못", "숨이안", "숨을못", "숨이차", "가슴이아파", "가슴이답답",
                    "불이야", "불났", "연기가", "가스냄새", "119", "응급", "피가나"]
 FIRE_WORDS      = ["불이야", "불났", "연기가", "가스냄새"]
-SYMPTOM_RE      = re.compile(r"어지러|아파(?!트)|아프|토할|열이나|몸이안좋|기운이없|힘이없")
+SYMPTOM_RE      = re.compile(r"어지러|어지럽|아파(?!트)|아프|토할|열이나|몸이안좋|기운이없|힘이없")
 # 짧은 대답(응/어/네)은 다른 단어 안에도 들어 있어서 문장 전체가 일치할 때만 인정
 YES_EXACT       = {"응", "어", "네", "예", "그래", "응응", "네네", "그래요", "좋아"}
 YES_WORDS       = ["알려", "불러", "부탁", "연락해", "그래줘", "알려줘"]
@@ -423,6 +424,9 @@ def _system_prompt(profile: dict, wake_name: str = DEFAULT_WAKE_NAME) -> str:
         "5. 외롭거나 슬프다고 하시면 해결책보다 먼저 마음을 알아드리고, 짧은 질문으로 이야기를 이어가.",
         "6. 전화나 연락처럼 실제로 하지 않은 일을 했다고 말하지 마.",
         "7. 어르신이 말하지 않은 일을 하셨다고 단정하지 마. 관심사와 기억은 참고만 하고 궁금하면 여쭤봐.",
+        f"8. 어르신은 {profile.get('지역') or '부산'} 분이라 경상도 사투리를 쓰실 수 있어. "
+        "('묵다'=먹다, '머라카노'=뭐라고, '고마'=그만, '하모'=그럼, '단디'=단단히, '쪼매'=조금) "
+        "사투리를 그대로 알아듣고, 대답은 알아듣기 쉬운 표준어 존댓말로 해.",
         f"지금: {now.month}월 {now.day}일 {_korean_time(now.strftime('%H:%M'))}",
     ]
     if profile.get("관심사"):
@@ -587,7 +591,7 @@ async def _profile_for(db: AsyncSession, senior_id: int) -> dict:
 
 async def proactive(db: AsyncSession, session_id: str, senior_id: int, force: str | None = None) -> dict:
     """기기가 30초마다 호출. 지금 먼저 할 말이 있으면 say 에 담아 준다.
-    force: 'med' | 'morning' | 'checkin' — 시연용으로 시간 조건을 무시하고 바로 실행"""
+    force: 'med' | 'message' | 'morning' | 'checkin' — 시연용으로 시간 조건을 무시하고 바로 실행"""
     now = datetime.now()
     today = now.strftime("%Y-%m-%d")
     if not force and (_is_quiet(now) or time.time() < _muted_until.get(session_id, 0)):
@@ -608,6 +612,12 @@ async def proactive(db: AsyncSession, session_id: str, senior_id: int, force: st
                 _pending_med[session_id] = m.id
                 say, kind = f"{who}, {m.name} 드실 시간이에요. 드셨어요?", "med"
                 break
+
+    # 1-1) 보호자가 보낸 메시지 읽어 드리기
+    if not say and force in (None, "message"):
+        msg_say = await _deliver_message(db, session_id, senior_id, who)
+        if msg_say:
+            say, kind = msg_say, "message"
 
     # 2) 아침 인사 (7~11시, 하루 한 번) + 오늘 일정
     if not say and force in (None, "morning") and \
@@ -654,7 +664,8 @@ async def daily_summary(db: AsyncSession, senior_id: int, day: str | None = None
     for c in convs:
         if c.role == "user":
             topics[c.type or "생활정보"] = topics.get(c.type or "생활정보", 0) + 1
-    joined = _norm(" ".join(said))
+    joined = _norm(dialect.normalize(" ".join(said)))
+    joined = re.sub(r"걱정(말|마|하지마|안해|없)", "", joined)    # '걱정 말라'는 나쁜 기분이 아님
     pos, neg = sum(joined.count(w) for w in POSITIVE), sum(joined.count(w) for w in NEGATIVE)
     mood = "대화 없음" if not said else ("좋아 보여요" if pos > neg else "살펴봐 주세요" if neg > pos else "보통이에요")
 
@@ -693,6 +704,96 @@ async def daily_summary(db: AsyncSession, senior_id: int, day: str | None = None
 
 
 # ════════════════════════════════════════════════════════════
+#  보호자 ↔ 어르신 음성 메시지
+#   - 보호자가 앱에서 글을 보내면 → 기기가 먼저 말 걸기로 읽어 드리고 "답장하실 말씀 있으세요?"
+#   - 어르신 대답은 답장으로 저장 → 보호자 앱에 표시
+#   - 어르신이 먼저 "딸한테 저녁 먹었다고 전해 줘" 해도 보호자 앱으로 전달
+#   - 저장: settings 테이블 key = "messages:<어르신id>" (JSON 목록, 최근 50개)
+# ════════════════════════════════════════════════════════════
+RELAY_REPLY_SEC = 45                                   # 읽어 드린 뒤 답장을 기다리는 시간
+RELAY_VERB = r"(전해|전하|말해|알려|얘기해|이야기해)\s*(줘|주라|도|도고|다오|주이소|주세요|드려|라|요)?"
+SEND_RE  = re.compile(r"^(?P<to>\S+?)(한테|에게|께|보고)\s+(?P<msg>.+?)\s*" + RELAY_VERB + r"\s*[.!?~]*$")
+REPLY_TAIL_RE = re.compile(r"\s*(좀\s*)?" + RELAY_VERB + r"\s*[.!?~]*$")
+FAMILY_RE = re.compile(r"아들|딸|며느리|사위|손녀|손자|보호자|자식|애들|큰애|작은애|아가|영감|할배|할매|언니|오빠|동생|형|누나")
+_pending_relay: dict[str, tuple[int, float]] = {}      # 세션 → (답장 기다리는 메시지 id, 마감 시각)
+
+
+async def load_messages(db: AsyncSession, senior_id: int) -> list[dict]:
+    res = await db.execute(select(Setting).where(Setting.key == f"messages:{senior_id}"))
+    row = res.scalar_one_or_none()
+    try:
+        return json.loads(row.value) if row and row.value else []
+    except ValueError:
+        return []
+
+
+async def _save_messages(db: AsyncSession, senior_id: int, items: list[dict]) -> None:
+    key = f"messages:{senior_id}"
+    res = await db.execute(select(Setting).where(Setting.key == key))
+    row = res.scalar_one_or_none()
+    value = json.dumps(items[-50:], ensure_ascii=False)
+    if row:
+        row.value = value
+    else:
+        db.add(Setting(key=key, value=value))
+    await db.commit()
+
+
+async def send_guardian_message(db: AsyncSession, senior_id: int, text: str, sender: str = "") -> dict:
+    """보호자 → 어르신 (앱에서 호출)"""
+    text = (text or "").strip()
+    if not text:
+        raise ValueError("보낼 내용을 입력해 주세요.")
+    if len(text) > 100:
+        raise ValueError("어르신이 듣기 편하게 100자 이내로 써 주세요.")
+    items = await load_messages(db, senior_id)
+    msg = {"id": max([m["id"] for m in items], default=0) + 1, "from": "guardian",
+           "sender": (sender or "").strip()[:10], "text": text,
+           "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+           "delivered_at": None, "reply": None, "reply_at": None}
+    items.append(msg)
+    await _save_messages(db, senior_id, items)
+    return msg
+
+
+def _relay_body(text: str) -> str:
+    """'알았다고 전해 도' → '알았다'"""
+    body = REPLY_TAIL_RE.sub("", text.strip())
+    body = re.sub(r"(?<=[다라냐자요])고$", "", body.strip())     # '먹었다고' → '먹었다', '말라고' → '말라'
+    return re.sub(r"[\s,.!?~]+$", "", body).strip() or text.strip()
+
+
+async def _deliver_message(db: AsyncSession, session_id: str, senior_id: int, who: str) -> str | None:
+    """아직 읽어 드리지 않은 보호자 메시지가 있으면 읽어 드릴 문장을 만든다"""
+    items = await load_messages(db, senior_id)
+    msg = next((m for m in items if m["from"] == "guardian" and not m["delivered_at"]), None)
+    if not msg:
+        return None
+    msg["delivered_at"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    await _save_messages(db, senior_id, items)
+    _pending_relay[session_id] = (msg["id"], time.time() + RELAY_REPLY_SEC)
+    sender = f"{msg['sender']}님이" if msg["sender"] else "보호자분이"
+    return f"{who}, {sender} 메시지를 보내셨어요. \"{msg['text']}\" 답장하실 말씀 있으세요?"
+
+
+async def _save_reply(db: AsyncSession, senior_id: int, msg_id: int, text: str) -> None:
+    items = await load_messages(db, senior_id)
+    for m in items:
+        if m["id"] == msg_id:
+            m["reply"], m["reply_at"] = text, datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    await _save_messages(db, senior_id, items)
+
+
+async def _send_senior_message(db: AsyncSession, senior_id: int, to: str, text: str) -> None:
+    """어르신 → 보호자 ("딸한테 ~ 전해 줘")"""
+    items = await load_messages(db, senior_id)
+    items.append({"id": max([m["id"] for m in items], default=0) + 1, "from": "senior", "sender": to,
+                  "text": text, "created_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                  "delivered_at": None, "reply": None, "reply_at": None})
+    await _save_messages(db, senior_id, items)
+
+
+# ════════════════════════════════════════════════════════════
 #  메인 진입점
 # ════════════════════════════════════════════════════════════
 async def _save(db: AsyncSession, session_id: str, senior_id: int, role: str, text: str, ctype: str):
@@ -704,7 +805,8 @@ async def _save(db: AsyncSession, session_id: str, senior_id: int, role: str, te
 async def reply(db: AsyncSession, text: str, session_id: str, senior_id: int,
                 require_wake: bool = True) -> dict:
     started = time.perf_counter()
-    t = _norm(text)
+    std = dialect.normalize(text)                # 사투리 → 표준어 (규칙 판단용, 저장·LLM 에는 원래 말)
+    t = _norm(std)
     intent, ctype, source, llm_ms = "chat", "생활정보", "rule", 0
 
     # ── 이름 짓기: 처음 켰을 때(이름 없음) 또는 이름 바꾸는 중 ──
@@ -726,17 +828,20 @@ async def reply(db: AsyncSession, text: str, session_id: str, senior_id: int,
     # ── 호출어: 이름을 부른 말에만 대답 ─────────────────────
     wake_name = await get_wake_name(db)
     if require_wake:
+        relay_wait = _pending_relay.get(session_id)
         awake = (time.time() < _awake_until.get(session_id, 0) or session_id in _pending_confirm
-                 or session_id in _pending_med)      # 먼저 여쭤본 질문에는 이름 없이 대답 가능
+                 or session_id in _pending_med       # 먼저 여쭤본 질문에는 이름 없이 대답 가능
+                 or (relay_wait and time.time() < relay_wait[1]))
         urgent = _has(EMERGENCY_WORDS, t) and "뻔" not in t
-        found = find_wake_name(t, wake_name)
+        found = find_wake_name(_norm(text), wake_name) or find_wake_name(t, wake_name)
         if not (awake or found or urgent):
             return {"respond": False, "reply": "", "intent": "ignored", "source": "rule",
                     "wake_name": wake_name, "latency_ms": int((time.perf_counter() - started) * 1000),
                     "llm_ms": 0}
         if found:
             text = strip_wake_name(text, found)
-            t = _norm(text)
+            std = dialect.normalize(text)
+            t = _norm(std)
             if len(t) < 2:                       # 이름만 불렀을 때
                 _awake_until[session_id] = time.time() + WAKE_WINDOW_SEC
                 answer = "네, 말씀하세요."
@@ -770,12 +875,16 @@ async def reply(db: AsyncSession, text: str, session_id: str, senior_id: int,
         await _save(db, session_id, senior_id, "assistant", answer, ctype)
         _awake_until[session_id] = time.time() + WAKE_WINDOW_SEC
         return {"respond": True, "reply": answer, "intent": "repeat", "source": "rule",
-                "speak_rate": "slow", "wake_name": wake_name,
+                "speak_rate": "slow", "wake_name": wake_name, "heard_as": std if std != text.strip() else None,
                 "latency_ms": int((time.perf_counter() - started) * 1000), "llm_ms": 0}
 
     # 0) 직전에 "보호자분께 알릴까요?" / "약 드셨어요?" 라고 여쭤본 경우
     med_pending = _pending_med.pop(session_id, None)
     pending = _pending_confirm.pop(session_id, None)
+    relay = _pending_relay.pop(session_id, None)
+    relay = relay if relay and time.time() < relay[1] else None
+    send = SEND_RE.match(std)
+    urgent_said = _has(EMERGENCY_WORDS, t) and "뻔" not in t
     said_no = _has(["아직", "안먹", "아니", "깜빡", "까먹"], t)
     if med_pending and not said_no and (t in YES_EXACT or "먹었" in t or "드셨" in t
                                         or t.startswith(("응", "네", "어", "그래", "예"))):
@@ -796,6 +905,18 @@ async def reply(db: AsyncSession, text: str, session_id: str, senior_id: int,
         intent = "emergency_declined"
         answer = "알겠어요. 계속 안 좋으시면 언제든 저를 불러 주세요."
 
+    # 0-1) 보호자 메시지를 읽어 드린 뒤의 대답 → 답장으로 저장
+    elif relay and not urgent_said and len(t) >= 2:
+        if (t in YES_EXACT or _has(["없어", "없다", "됐어", "괜찮", "아니"], t)) and len(t) <= 6:
+            intent, ctype = "relay_none", "생활정보"
+            answer = "알겠어요. 메시지 잘 들으셨다고 보호자분께 표시해 둘게요."
+            await _save_reply(db, senior_id, relay[0], "(잘 들으셨어요)")
+        else:
+            body = _relay_body(text)
+            await _save_reply(db, senior_id, relay[0], body)
+            intent, ctype, source = "relay_reply", "생활정보", "db"
+            answer = f"네, \"{body}\" 하고 보호자분 앱으로 전해 드렸어요."
+
     # 1) 못 알아들음
     elif len(t) < 2:
         intent, answer = "unclear", MSG_UNCLEAR
@@ -807,6 +928,14 @@ async def reply(db: AsyncSession, text: str, session_id: str, senior_id: int,
         answer = ("많이 놀라셨죠. 보호자분 앱으로 바로 알림을 보냈어요. "
                   + ("가스 밸브를 잠그고 밖으로 나가세요." if _has(FIRE_WORDS, t)
                      else "무리하게 움직이지 마시고 그 자리에 계세요."))
+
+    # 2-1) "딸한테 저녁 먹었다고 전해 줘" → 보호자 앱으로 전달
+    elif send and FAMILY_RE.search(send.group("to")):
+        to = send.group("to")
+        body = _relay_body(text.split(maxsplit=1)[1] if len(text.split(maxsplit=1)) > 1 else text)
+        await _send_senior_message(db, senior_id, to, body)
+        intent, ctype, source = "relay_send", "생활정보", "db"
+        answer = f"네, {to}한테 \"{body}\" 하고 앱으로 전해 드렸어요."
 
     # 3) 애매한 몸 상태 → 확인 질문
     elif SYMPTOM_RE.search(t) and not MED_RE.search(t):
@@ -862,4 +991,5 @@ async def reply(db: AsyncSession, text: str, session_id: str, senior_id: int,
         "source": source,            # rule | db | api | local | cloud | fallback
         "latency_ms": int((time.perf_counter() - started) * 1000),
         "llm_ms": llm_ms,
+        "heard_as": std if std != text.strip() else None,   # 사투리를 표준어로 바꿔 알아들은 경우
     }

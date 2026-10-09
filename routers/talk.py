@@ -19,6 +19,12 @@ class WakeNameUpdate(BaseModel):
     name: str
 
 
+class GuardianMessage(BaseModel):
+    text: str
+    senior_id: int = 4
+    sender: str = ""               # 앱에 보일 보내는 사람 (예: "딸 다혜"). 비우면 "보호자분"
+
+
 # 어르신 발화 → 노인 맞춤 대답 (대화 저장까지 포함)
 @router.post("/")
 async def talk(req: TalkRequest, db: AsyncSession = Depends(get_db)):
@@ -58,7 +64,7 @@ async def delete_wake_name(db: AsyncSession = Depends(get_db)):
 
 
 # 먼저 말 걸기: 기기가 30초마다 호출 → say 가 있으면 말한다
-#   force=med|morning|checkin : 시연용으로 시간 조건 없이 바로 실행
+#   force=med|message|morning|checkin : 시연용으로 시간 조건 없이 바로 실행
 @router.get("/proactive")
 async def get_proactive(session_id: str = "oasis-device-1", senior_id: int = 4,
                         force: str | None = None, db: AsyncSession = Depends(get_db)):
@@ -81,3 +87,19 @@ async def get_memories(senior_id: int = 4, db: AsyncSession = Depends(get_db)):
 async def delete_memories(senior_id: int = 4, db: AsyncSession = Depends(get_db)):
     await elder_engine.save_memories(db, senior_id, [])
     return {"message": "기억을 모두 지웠어요."}
+
+
+# 보호자 ↔ 어르신 메시지
+#   POST: 보호자가 보냄 → 기기가 30초 안에 읽어 드리고 답장을 받아 둔다
+#   GET : 앱에서 대화 목록 (보호자 메시지 + 읽어 드린 시각 + 어르신 답장, 어르신이 먼저 보낸 말)
+@router.get("/messages")
+async def get_messages(senior_id: int = 4, db: AsyncSession = Depends(get_db)):
+    return {"messages": await elder_engine.load_messages(db, senior_id)}
+
+
+@router.post("/messages")
+async def post_message(body: GuardianMessage, db: AsyncSession = Depends(get_db)):
+    try:
+        return await elder_engine.send_guardian_message(db, body.senior_id, body.text, body.sender)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
