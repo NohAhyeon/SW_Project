@@ -2478,9 +2478,13 @@ class _LogTabState extends State<_LogTab> {
   Future<void> _loadSilently() async {
     final chats = await ApiService.getChatLogs();
     if (!mounted) return;
+    // 새 말이 늘면 아래로 스크롤, 기존 말이 다듬어져 바뀌면(받아쓰기 고침) 내용만 갱신
+    String sig(List<Map> l) => l.map((c) => '${c['id'] ?? ''}:${c['content'] ?? c['message'] ?? ''}').join('|');
     if (chats.length != _chats.length) {
       setState(() => _chats = chats);
       WidgetsBinding.instance.addPostFrameCallback((_) => _scrollToBottom());
+    } else if (sig(chats) != sig(_chats)) {
+      setState(() => _chats = chats);
     }
   }
 
