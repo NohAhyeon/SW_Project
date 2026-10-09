@@ -207,6 +207,7 @@ class _HomeTabState extends State<_HomeTab> {
   List<Map> _alerts = [];
   Map<String, dynamic>? _weather;
   Map<String, dynamic>? _summary;
+  String? _wakeName;
   bool _loading = true;
 
   @override
@@ -229,6 +230,8 @@ class _HomeTabState extends State<_HomeTab> {
       _meds = meds; _scheds = scheds; _weather = weather;
       _alerts = alerts; _loading = false;
     });
+    final wakeName = await ApiService.getWakeName();
+    if (mounted) setState(() => _wakeName = wakeName);
     // 요약은 AI가 만들어서 조금 걸리므로 화면을 먼저 보여준 뒤 채운다
     final summary = await ApiService.getDailySummary();
     if (mounted) setState(() => _summary = summary);
@@ -325,6 +328,28 @@ class _HomeTabState extends State<_HomeTab> {
                           letterSpacing: -0.6,
                           fontWeight: FontWeight.w800,
                           color: _text1)),
+                  // 어르신 화면: 챗봇을 부르는 이름을 늘 보이게 (이름을 잊으셔도 되도록)
+                  if (s && _wakeName != null) ...[
+                    const SizedBox(height: 18),
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                      decoration: BoxDecoration(
+                        color: _brandSoft,
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.record_voice_over_rounded, color: _brand, size: 30),
+                          const SizedBox(width: 12),
+                          Flexible(
+                            child: Text("'${_callingName(_wakeName!)}' 하고 불러 보세요",
+                                style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, color: _brand)),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -2836,7 +2861,10 @@ class _WakeNameRowState extends State<_WakeNameRow> {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
 
   Future<void> _edit() async {
-    final ctrl = TextEditingController(text: _name ?? '');
+    if (_name == null) await _load();            // 아직 못 불러왔으면 먼저 불러와서 채운다
+    final current = _name ?? '';
+    final ctrl = TextEditingController(text: current)
+      ..selection = TextSelection.collapsed(offset: current.length);
     String? error;
     await showModalBottomSheet(
       context: context,

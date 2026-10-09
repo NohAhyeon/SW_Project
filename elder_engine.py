@@ -116,24 +116,48 @@ def _jamo(s: str) -> str:
     return "".join(out)
 
 
+# 받아쓰기는 글자가 달라도 소리는 같은 경우가 많다 (지니↔진이, 복실아↔복시라, 찌니↔지니)
+#   → 발음 기준 문자열로 바꿔서 비교한다
+_TENSE = {"ᄁ": "ᄀ", "ᄄ": "ᄃ", "ᄈ": "ᄇ", "ᄊ": "ᄉ", "ᄍ": "ᄌ"}          # 된소리 → 예사소리
+_VOWEL = {"ᅢ": "ᅦ", "ᅤ": "ᅨ", "ᅫ": "ᅰ", "ᅬ": "ᅰ"}                    # 헷갈리는 모음 합치기
+_JONG_TO_CHO = {"ᆨ": "ᄀ", "ᆫ": "ᄂ", "ᆮ": "ᄃ", "ᆯ": "ᄅ", "ᆷ": "ᄆ", "ᆸ": "ᄇ",
+                "ᆺ": "ᄉ", "ᆻ": "ᄉ", "ᆽ": "ᄌ", "ᆾ": "ᄌ", "ᆿ": "ᄀ", "ᇀ": "ᄃ",
+                "ᇁ": "ᄇ", "ᇂ": "", "ᆩ": "ᄀ", "ᆼ": "ᆼ"}
+
+
+def _phon(s: str) -> str:
+    """발음 기준 문자열: 받침은 다음 글자로 넘어가는 소리처럼, 첫소리 ㅇ 은 소리가 없으니 뺀다"""
+    out = []
+    for ch in _jamo(s):
+        if ch == "ᄋ":
+            continue
+        ch = _JONG_TO_CHO.get(ch, ch)
+        out.append(_VOWEL.get(_TENSE.get(ch, ch), _TENSE.get(ch, ch)))
+    return "".join(out)
+
+
 def find_wake_name(t: str, name: str):
-    """띄어쓰기 없앤 문장 t 에서 이름을 찾는다 → 찾은 부분 문자열 또는 None.
-    3글자 이상 이름은 받아쓰기 오차(오아시쓰, 아시스)도 허용, 2글자 이하는 정확히 일치할 때만."""
+    """띄어쓰기 없앤 문장 t 에서 이름을 찾는다 → 찾은 부분 문자열(원래 글자) 또는 None.
+    ① 글자가 같거나 ② 발음이 같으면 인정 (지니 ↔ 진이·찌니)
+    ③ 3글자 이상 이름은 발음이 조금 달라도 인정 (오아시스 ↔ 오아시쓰·아시스)"""
     name = _norm(name)
     if not name:
         return None
     if name in t:
         return name
-    if len(name) < 3:
+    target = _phon(name)
+    windows = [t[i:i + size] for size in (len(name) - 1, len(name), len(name) + 1) if size > 0
+               for i in range(0, max(len(t) - size + 1, 0))]
+    for sub in windows:                                  # 발음이 똑같은 부분
+        if _phon(sub) == target:
+            return sub
+    if len(name) < 3:                                    # 2글자 이름은 발음이 같을 때만 (오작동 방지)
         return None
-    target = _jamo(name)
     best, best_ratio = None, 0.0
-    for size in (len(name) - 1, len(name), len(name) + 1):
-        for i in range(0, max(len(t) - size + 1, 0)):
-            sub = t[i:i + size]
-            ratio = SequenceMatcher(None, _jamo(sub), target).ratio()
-            if ratio > best_ratio:
-                best, best_ratio = sub, ratio
+    for sub in windows:
+        ratio = SequenceMatcher(None, _phon(sub), target).ratio()
+        if ratio > best_ratio:
+            best, best_ratio = sub, ratio
     return best if best_ratio >= 0.8 else None
 
 
