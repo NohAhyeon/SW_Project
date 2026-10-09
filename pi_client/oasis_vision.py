@@ -189,11 +189,37 @@ class InactivityDetector:
 #  홈캠 영상 서버 (MJPEG) — 앱이 http://<파이>:5000/video 로 본다
 # ════════════════════════════════════════════════════════════
 class FrameHub:
-    def __init__(self):
+    """AI 분석 줄(GStreamer)을 막지 않도록, 그림 그리기·JPEG 압축은 따로 도는 줄에서 한다.
+    분석 줄은 최신 화면만 넘겨 두고 바로 돌아가고(submit), 압축 줄은 최대 STREAM_FPS 로 최신 것만 보낸다."""
+    def __init__(self, max_width=640, quality=65, fps=None):
         self._jpg, self._cond = None, threading.Condition()
+        self._pending, self._plock = None, threading.Lock()
+        self.max_width, self.quality = max_width, quality
+        self.interval = 1.0 / (fps or float(os.getenv("OASIS_STREAM_FPS", "20")))
+        threading.Thread(target=self._encoder, daemon=True).start()
 
-    def push(self, frame_bgr, quality=70):
-        ok, jpg = cv2.imencode(".jpg", frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, quality])
+    def submit(self, frame, draw=None):
+        """분석 줄에서 호출: 화면과 '나중에 그릴 함수'만 맡기고 즉시 돌아간다 (밀린 화면은 버림)"""
+        with self._plock:
+            self._pending = (frame, draw)
+
+    def _encoder(self):
+        while True:
+            t0 = time.time()
+            with self._plock:
+                item, self._pending = self._pending, None
+            if item is not None:
+                frame, draw = item
+                if draw is not None:
+                    frame = draw(frame)
+                self.push(frame)
+            time.sleep(max(0.0, self.interval - (time.time() - t0)))
+
+    def push(self, frame_bgr, quality=None):
+        h, w = frame_bgr.shape[:2]
+        if w > self.max_width:                       # 홈캠은 640px 이면 충분 (압축이 훨씬 빠름)
+            frame_bgr = cv2.resize(frame_bgr, (self.max_width, int(h * self.max_width / w)))
+        ok, jpg = cv2.imencode(".jpg", frame_bgr, [cv2.IMWRITE_JPEG_QUALITY, quality or self.quality])
         if ok:
             with self._cond:
                 self._jpg = jpg.tobytes()
@@ -287,7 +313,8 @@ def run_hailo():
         fmt, width, height = get_caps_from_pad(pad)
         if fmt is None or width is None:
             return Gst.PadProbeReturn.OK
-        frame = cv2.cvtColor(get_numpy_from_buffer(buffer, fmt, width, height), cv2.COLOR_RGB2BGR)
+        rgb = get_numpy_from_buffer(buffer, fmt, width, height)   # 색 변환·압축은 압축 줄에서 (여기선 복사만)
+        frame = None
 
         people, fall_now = [], False
         roi = hailo.get_roi_from_buffer(buffer)
@@ -304,20 +331,26 @@ def run_hailo():
                    p.confidence()) for p in lms[0].get_points()]
             if fall.update(pid, kp, bbox):
                 fall_now = True
+                frame = frame if frame is not None else cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
                 alerts.send("낙상", "카메라에서 낙상이 감지되었어요. 어르신 상태를 확인해 주세요.", frame.copy())
             if INACTIVITY_ON and i == 0 and idle.update_keypoints(kp, bbox):
+                frame = frame if frame is not None else cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
                 alerts.send("비활동", f"어르신이 {_dur(INACTIVE_SEC)} 넘게 움직이지 않으세요.", frame.copy())
             people.append((kp, bbox, fall.last_status.get(pid, "OK")))
         if not persons:
             idle.no_person()
 
-        hub.push(draw_overlay(frame, people, fall_now, idle.idle_seconds(), INACTIVE_SEC))
+        idle_sec = idle.idle_seconds()
+        hub.submit(rgb.copy(), lambda f, p=people, fn=fall_now, s=idle_sec:
+                   draw_overlay(cv2.cvtColor(f, cv2.COLOR_RGB2BGR), p, fn, s, INACTIVE_SEC))
         return Gst.PadProbeReturn.OK
 
     if "--use-frame" not in sys.argv:
         sys.argv.append("--use-frame")
     if "--input" not in sys.argv:
         sys.argv += ["--input", "usb"]
+    if "--disable-sync" not in sys.argv:             # 화면 시계에 맞춰 기다리지 않고 들어오는 대로 처리
+        sys.argv.append("--disable-sync")
     print(f"[AI HAT 모드] 백엔드 {BACKEND_URL} / 비활동 {INACTIVE_SEC}초 / 낙상 후 누움 {FALL_LYING_SEC}초")
     GStreamerPoseEstimationApp(callback, UserData()).run()
 
