@@ -12,18 +12,28 @@ String get _snapshotUrl => _streamUrl.endsWith('/video')
     ? _streamUrl.replaceFirst(RegExp(r'/video$'), '/snapshot')
     : '${_streamUrl.replaceFirst(RegExp(r'/$'), '')}/snapshot';
 
+// 맥 서버가 파이 연속 영상에서 최신 사진을 뽑아 주는 주소 (routers/camera.py 의 /camera/live.jpg)
+String get _relayUrl => '$baseUrl/camera/live.jpg';
+
 String get _streamHtml => '''
 <!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>html,body{margin:0;padding:0;width:100%;height:100%;overflow:hidden;background:#191F28}
 img{width:100%;height:100%;object-fit:cover;display:block}</style></head>
 <body><img id="v" alt="">
 <script>
+  // 파이 카메라에 /snapshot 이 있으면 바로 받고, 없으면(연속 영상만 주는 카메라) 맥 서버 중계로 받는다
+  var sources = ['$_snapshotUrl', '$_relayUrl'];
+  var pick = 0, fails = 0;
   var view = document.getElementById('v');
   function next() {
     var img = new Image();
-    img.onload = function () { view.src = img.src; setTimeout(next, 40); };
-    img.onerror = function () { setTimeout(next, 1000); };
-    img.src = '$_snapshotUrl?t=' + Date.now();
+    img.onload = function () { fails = 0; view.src = img.src; setTimeout(next, 60); };
+    img.onerror = function () {
+      fails++;
+      if (fails >= 2) { pick = (pick + 1) % sources.length; fails = 0; }
+      setTimeout(next, 700);
+    };
+    img.src = sources[pick] + '?t=' + Date.now();
   }
   next();
 </script></body></html>''';
